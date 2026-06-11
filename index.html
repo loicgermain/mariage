@@ -201,6 +201,24 @@
     body.locked .nav { display: none; }
     body.locked #privacy-btn, body.locked #sync-badge, body.locked #logout-btn { display: none; }
     body:not(.locked) #logout-btn { display: inline-block; }
+
+    /* ── Tablettes & grands écrans (iPad, Samsung Tab...) ── */
+    @media (min-width: 768px) {
+      .app { max-width: 860px; }
+      .nav { max-width: 860px; }
+      .content { padding: 16px 18px 100px; }
+      .topbar { padding-left: 18px; padding-right: 18px; }
+      /* Cartes de métriques : autant de colonnes que la largeur le permet */
+      .mg { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+      /* Formulaires d'invités plus denses */
+      .fgrid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .hero-val { font-size: 42px; }
+      .nav-btn { padding: 12px 4px 13px; font-size: 11px; }
+      .nav-btn .icon { font-size: 24px; }
+      /* Modales centrées (au lieu d'une feuille en bas d'écran) */
+      .mbg { align-items: center; }
+      .modal { max-width: 560px; border-radius: var(--radius); }
+    }
   </style>
 </head>
 <body class="locked">
