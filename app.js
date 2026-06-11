@@ -124,8 +124,8 @@ function renderDashboard() {
     return `<div class="brow"><span class="bcat">${c}</span><div class="bwrap"><div class="bbar ${cls}" style="width:${Math.min(pct*100,100).toFixed(0)}%"></div></div><span class="bamt">${eur(eng)}/${eur(bud)}</span></div>`;
   }).join('');
   return `
-    <div class="hero"><div class="hero-lbl">Solde disponible</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Revenus ${eur(t.totalRev)} — Engagé ${eur(t.engage)}</div></div>
-    <div class="mg"><div class="mc"><div class="ml">Engagé</div><div class="mv purple">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Payé</div><div class="mv green">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div><div class="mc"><div class="ml">Budget estimé</div><div class="mv">${eur(t.budgetTotal)}</div></div></div>
+    <div class="hero"><div class="hero-lbl">Reste à dépenser</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Argent dispo ${eur(t.totalRev)} − Total dépenses ${eur(t.engage)}</div></div>
+    <div class="mg"><div class="mc"><div class="ml">Argent dispo</div><div class="mv green">${eur(t.totalRev)}</div></div><div class="mc"><div class="ml">Total dépenses</div><div class="mv purple">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv green">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
     ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
     <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
