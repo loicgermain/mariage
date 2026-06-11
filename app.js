@@ -127,7 +127,8 @@ function renderDashboard() {
     <div class="hero"><div class="hero-lbl">Solde disponible</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Revenus ${eur(t.totalRev)} — Engagé ${eur(t.engage)}</div></div>
     <div class="mg"><div class="mc"><div class="ml">Engagé</div><div class="mv purple">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Payé</div><div class="mv green">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div><div class="mc"><div class="ml">Budget estimé</div><div class="mv">${eur(t.budgetTotal)}</div></div></div>
     ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
-    <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>`;
+    <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
+    <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
 }
 
 // ── Render Dépenses ──────────────────────────────────────────────────────────
@@ -264,6 +265,59 @@ window.addFoyer = () => {
 };
 
 window.closeModal = () => { document.getElementById('modal-root').innerHTML = ''; };
+
+// ── Export Excel ─────────────────────────────────────────────────────────────
+window.exportExcel = async () => {
+  const btn = document.getElementById('export-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
+  try {
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+    const wb = XLSX.utils.book_new();
+
+    const dep = data.depenses.map(d => ({
+      Description: d.desc,
+      Catégorie: d.cat,
+      'Montant total (€)': d.total,
+      'Acompte payé (€)': d.acompte,
+      'Solde payé (€)': d.solde,
+      'Reste à payer (€)': Math.max(0, d.total - d.acompte - d.solde),
+      Statut: statut(d),
+      'Date limite': d.dateLimite,
+      Remarque: d.rem
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dep), 'Dépenses');
+
+    const rev = data.revenus.map(r => ({
+      Source: r.source,
+      Type: r.type,
+      'Montant (€)': r.montant,
+      'Date réception': r.date,
+      Reçu: r.date ? 'Oui' : 'Non',
+      Remarque: r.rem
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rev), 'Revenus');
+
+    const inv = data.foyers.map(f => ({
+      Foyer: f.nom,
+      Groupe: f.groupe,
+      Moment: f.moment,
+      'Adultes invités': f.adultes,
+      'Enfants invités': f.enfants,
+      RSVP: f.rsvp,
+      'Adultes confirmés': f.confAdultes ?? '',
+      'Enfants confirmés': f.confEnfants ?? '',
+      Adresse: f.adresse,
+      Remarque: f.rem
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), 'Invités');
+
+    XLSX.writeFile(wb, `mariage-${today()}.xlsx`);
+  } catch (e) {
+    alert("Échec de l'export. Vérifiez votre connexion internet et réessayez.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 Exporter vers Excel'; }
+  }
+};
 
 window.openDepModal = (id = null) => {
   const d = id !== null ? data.depenses.find(x => x.id === id) : null;
