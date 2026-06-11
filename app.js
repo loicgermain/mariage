@@ -483,7 +483,23 @@ function render() {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+// Service worker + mise à jour automatique : dès qu'une nouvelle version est
+// déployée, l'app la récupère et se recharge toute seule (plus besoin de vider
+// le cache à la main).
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing || !hadController) return;
+    refreshing = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    // Vérifie les mises à jour à chaque ouverture et périodiquement
+    reg.update();
+    setInterval(() => reg.update(), 60 * 60 * 1000);
+  });
+}
 
 onAuthChange(user => {
   if (user) {
