@@ -10,6 +10,11 @@ let privacyMode = false;
 const eur  = n => privacyMode ? '•••' : new Intl.NumberFormat('fr-BE', {style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n);
 const eur2 = n => privacyMode ? '•••' : new Intl.NumberFormat('fr-BE', {style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
 
+// Échappement pour insérer du texte utilisateur dans les attributs / le HTML
+const escAttr = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+const escHtml = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const today = () => new Date().toISOString().slice(0,10);
+
 // ── Sync ─────────────────────────────────────────────────────────────────────
 function setSyncBadge(state) {
   const b = document.getElementById('sync-badge');
@@ -131,7 +136,7 @@ function renderDepenses() {
   const list = data.depenses.filter(d => depFilter === 'Tout' || d.cat === depFilter);
   const items = list.map(d => {
     const s = statut(d), r = Math.max(0, d.total - d.acompte - d.solde);
-    return `<div class="ditem"><div><div class="dname">${d.desc}</div><div class="dmeta">${d.cat}</div>${badgeDep(s)}</div><div><div class="damt">${eur2(d.total)}</div>${r > 0 ? `<div class="dreste">reste ${eur2(r)}</div>` : ''}</div></div>`;
+    return `<div class="ditem" onclick="openDepModal(${d.id})"><div><div class="dname">${d.desc}</div><div class="dmeta">${d.cat}</div>${badgeDep(s)}</div><div><div class="damt">${eur2(d.total)}</div>${r > 0 ? `<div class="dreste">reste ${eur2(r)}</div>` : ''}</div></div>`;
   }).join('');
   return `<button class="btn-primary" onclick="openDepModal()">+ Nouvelle dépense</button><div class="frow-chips">${chips}</div><div class="card">${items || '<div class="empty">Aucune dépense</div>'}</div>`;
 }
@@ -141,7 +146,7 @@ function renderRevenus() {
   const total = data.revenus.reduce((s,r) => s + r.montant, 0);
   const recu  = data.revenus.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
   const items = data.revenus.map(r => `
-    <div class="ritem">
+    <div class="ritem" onclick="openRevModal(${r.id})">
       <div><div class="rname">${r.source}</div><div class="rmeta">${r.type}</div>${r.rem ? `<span class="badge b-warn">${r.rem}</span>` : r.date ? '<span class="badge b-ok">Reçu</span>' : '<span class="badge b-gray">En attente</span>'}</div>
       <div class="rright"><div class="ramt">${eur2(r.montant)}</div>${r.date ? `<div class="rdate">${r.date.split('-').reverse().join('/')}</div>` : ''}</div>
     </div>`).join('');
@@ -260,45 +265,105 @@ window.addFoyer = () => {
 
 window.closeModal = () => { document.getElementById('modal-root').innerHTML = ''; };
 
-window.openDepModal = () => {
-  const cats = CATS.map(c => `<option>${c}</option>`).join('');
+window.openDepModal = (id = null) => {
+  const d = id !== null ? data.depenses.find(x => x.id === id) : null;
+  const cats = CATS.map(c => `<option${d && d.cat === c ? ' selected' : ''}>${c}</option>`).join('');
   document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
-    <div class="mtitle">Nouvelle dépense <button onclick="closeModal()" class="mclose">✕</button></div>
-    <div class="mf"><label>Description</label><input id="md" type="text" placeholder="Ex: DJ soirée"></div>
+    <div class="mtitle">${d ? 'Modifier la dépense' : 'Nouvelle dépense'} <button onclick="closeModal()" class="mclose">✕</button></div>
+    <div class="mf"><label>Description</label><input id="md" type="text" placeholder="Ex: DJ soirée" value="${d ? escAttr(d.desc) : ''}"></div>
     <div class="mf"><label>Catégorie</label><select id="mc">${cats}</select></div>
-    <div class="mf"><label>Montant total (€)</label><input id="mt" type="number" step="0.01" placeholder="0.00"></div>
-    <div class="mf"><label>Acompte payé (€)</label><input id="ma" type="number" step="0.01" value="0"></div>
-    <div class="mf"><label>Solde payé (€)</label><input id="ms" type="number" step="0.01" value="0"></div>
-    <div class="mf"><label>Date limite</label><input id="ml" type="date"></div>
-    <div class="mf"><label>Remarque</label><textarea id="mr"></textarea></div>
-    <div class="mcheck"><label><input type="checkbox" id="mop"> Option</label><label><input type="checkbox" id="mof"> Offert</label></div>
-    <div class="btn-row"><button class="btn-sec" onclick="closeModal()">Annuler</button><button class="btn-save" onclick="saveNewDep()">Enregistrer</button></div>
+    <div class="mf"><label>Montant total (€)</label><input id="mt" type="number" step="0.01" placeholder="0.00" value="${d ? d.total : ''}"></div>
+    <div class="mf"><label>Acompte payé (€)</label><input id="ma" type="number" step="0.01" value="${d ? d.acompte : 0}"></div>
+    <div class="mf"><label>Solde payé (€)</label><input id="ms" type="number" step="0.01" value="${d ? d.solde : 0}"></div>
+    <button type="button" class="btn-sec" style="width:100%;margin-bottom:12px" onclick="markSolde()">✓ Marquer comme entièrement payé</button>
+    <div class="mf"><label>Date limite</label><input id="ml" type="date" value="${d ? d.dateLimite : ''}"></div>
+    <div class="mf"><label>Remarque</label><textarea id="mr">${d ? escHtml(d.rem) : ''}</textarea></div>
+    <div class="mcheck"><label><input type="checkbox" id="mop"${d && d.option ? ' checked' : ''}> Option</label><label><input type="checkbox" id="mof"${d && d.offert ? ' checked' : ''}> Offert</label></div>
+    <div class="btn-row">
+      ${d ? `<button class="btn-del" onclick="deleteDep(${d.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
+      <button class="btn-save" onclick="saveDep(${d ? d.id : 'null'})">Enregistrer</button>
+    </div>
   </div></div>`;
 };
 
-window.saveNewDep = () => {
+window.markSolde = () => {
+  const total = parseFloat(document.getElementById('mt').value) || 0;
+  const acompte = parseFloat(document.getElementById('ma').value) || 0;
+  document.getElementById('ms').value = Math.max(0, +(total - acompte).toFixed(2));
+};
+
+window.saveDep = (id) => {
   const desc = document.getElementById('md').value.trim(); if (!desc) return;
-  const newId = Math.max(0, ...data.depenses.map(d => d.id)) + 1;
-  data.depenses.push({id:newId, desc, cat:document.getElementById('mc').value, option:document.getElementById('mop').checked, offert:document.getElementById('mof').checked, total:parseFloat(document.getElementById('mt').value)||0, acompte:parseFloat(document.getElementById('ma').value)||0, solde:parseFloat(document.getElementById('ms').value)||0, dateLimite:document.getElementById('ml').value||'', rem:document.getElementById('mr').value});
+  const fields = {
+    desc,
+    cat: document.getElementById('mc').value,
+    option: document.getElementById('mop').checked,
+    offert: document.getElementById('mof').checked,
+    total: parseFloat(document.getElementById('mt').value) || 0,
+    acompte: parseFloat(document.getElementById('ma').value) || 0,
+    solde: parseFloat(document.getElementById('ms').value) || 0,
+    dateLimite: document.getElementById('ml').value || '',
+    rem: document.getElementById('mr').value
+  };
+  if (id === null) {
+    const newId = Math.max(0, ...data.depenses.map(d => d.id)) + 1;
+    data.depenses.push({ id: newId, ...fields });
+  } else {
+    const d = data.depenses.find(x => x.id === id);
+    if (d) Object.assign(d, fields);
+  }
   closeModal(); render(); scheduleSave();
 };
 
-window.openRevModal = () => {
+window.deleteDep = (id) => {
+  if (!confirm('Supprimer cette dépense ?')) return;
+  data.depenses = data.depenses.filter(d => d.id !== id);
+  closeModal(); render(); scheduleSave();
+};
+
+window.openRevModal = (id = null) => {
+  const r = id !== null ? data.revenus.find(x => x.id === id) : null;
+  const types = ['Épargne', 'Contribution famille', 'Liste de mariage', 'Autre'];
+  const typeOpts = types.map(t => `<option${r && r.type === t ? ' selected' : ''}>${t}</option>`).join('');
   document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
-    <div class="mtitle">Nouveau revenu <button onclick="closeModal()" class="mclose">✕</button></div>
-    <div class="mf"><label>Source</label><input id="rs" type="text" placeholder="Ex: Cadeau tante Marie"></div>
-    <div class="mf"><label>Type</label><select id="rt"><option>Épargne</option><option>Contribution famille</option><option>Liste de mariage</option><option>Autre</option></select></div>
-    <div class="mf"><label>Montant (€)</label><input id="rm" type="number" step="0.01" placeholder="0.00"></div>
-    <div class="mf"><label>Date réception</label><input id="rd" type="date"></div>
-    <div class="mf"><label>Remarque</label><input id="rr" type="text" placeholder="Ex: Non reçu"></div>
-    <div class="btn-row"><button class="btn-sec" onclick="closeModal()">Annuler</button><button class="btn-save" onclick="saveNewRev()">Enregistrer</button></div>
+    <div class="mtitle">${r ? 'Modifier le revenu' : 'Nouveau revenu'} <button onclick="closeModal()" class="mclose">✕</button></div>
+    <div class="mf"><label>Source</label><input id="rs" type="text" placeholder="Ex: Cadeau tante Marie" value="${r ? escAttr(r.source) : ''}"></div>
+    <div class="mf"><label>Type</label><select id="rt">${typeOpts}</select></div>
+    <div class="mf"><label>Montant (€)</label><input id="rm" type="number" step="0.01" placeholder="0.00" value="${r ? r.montant : ''}"></div>
+    <div class="mf"><label>Date réception</label><input id="rd" type="date" value="${r ? r.date : ''}"></div>
+    <button type="button" class="btn-sec" style="width:100%;margin-bottom:12px" onclick="markRecu()">✓ Marquer reçu aujourd'hui</button>
+    <div class="mf"><label>Remarque</label><input id="rr" type="text" placeholder="Ex: Non reçu" value="${r ? escAttr(r.rem) : ''}"></div>
+    <div class="btn-row">
+      ${r ? `<button class="btn-del" onclick="deleteRev(${r.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
+      <button class="btn-save" onclick="saveRev(${r ? r.id : 'null'})">Enregistrer</button>
+    </div>
   </div></div>`;
 };
 
-window.saveNewRev = () => {
+window.markRecu = () => { document.getElementById('rd').value = today(); };
+
+window.saveRev = (id) => {
   const src = document.getElementById('rs').value.trim(); if (!src) return;
-  const newId = Math.max(0, ...data.revenus.map(r => r.id)) + 1;
-  data.revenus.push({id:newId, source:src, type:document.getElementById('rt').value, montant:parseFloat(document.getElementById('rm').value)||0, date:document.getElementById('rd').value||'', rem:document.getElementById('rr').value});
+  const fields = {
+    source: src,
+    type: document.getElementById('rt').value,
+    montant: parseFloat(document.getElementById('rm').value) || 0,
+    date: document.getElementById('rd').value || '',
+    rem: document.getElementById('rr').value
+  };
+  if (id === null) {
+    const newId = Math.max(0, ...data.revenus.map(r => r.id)) + 1;
+    data.revenus.push({ id: newId, ...fields });
+  } else {
+    const r = data.revenus.find(x => x.id === id);
+    if (r) Object.assign(r, fields);
+  }
+  closeModal(); render(); scheduleSave();
+};
+
+window.deleteRev = (id) => {
+  if (!confirm('Supprimer ce revenu ?')) return;
+  data.revenus = data.revenus.filter(r => r.id !== id);
   closeModal(); render(); scheduleSave();
 };
 

@@ -114,7 +114,8 @@
     .b-purple { background: var(--purple-light); color: var(--purple-text); }
 
     /* Dépenses */
-    .ditem { display: flex; justify-content: space-between; align-items: flex-start; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+    .ditem { display: flex; justify-content: space-between; align-items: flex-start; padding: 10px 0; border-bottom: 0.5px solid var(--border); cursor: pointer; }
+    .ditem:active { opacity: 0.6; }
     .ditem:last-child { border-bottom: none; }
     .dname { font-size: 14px; color: var(--text); margin-bottom: 2px; }
     .dmeta { font-size: 11px; color: var(--text-sec); margin-bottom: 3px; }
@@ -122,7 +123,8 @@
     .dreste{ font-size: 11px; color: var(--red); text-align: right; }
 
     /* Revenus */
-    .ritem  { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+    .ritem  { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 0.5px solid var(--border); cursor: pointer; }
+    .ritem:active { opacity: 0.6; }
     .ritem:last-child { border-bottom: none; }
     .rname  { font-size: 14px; color: var(--text); margin-bottom: 2px; }
     .rmeta  { font-size: 11px; color: var(--text-sec); margin-bottom: 3px; }
