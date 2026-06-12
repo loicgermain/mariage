@@ -5,6 +5,7 @@ let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
 let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
 let invExpanded = null, invSearch = '';
 let depSort = 'echeance', revSort = 'date';
+let epExpanded = null; // null = auto : déplié tant que le solde n'est pas saisi
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -269,11 +270,22 @@ function renderDepenses() {
 }
 
 // Carte Épargne (solde réel du compte + projection des mensualités à venir).
+// Repliable : compacte par défaut (une ligne), dépliée pour modifier.
 function renderEpargneCard() {
   const e = ensureEpargne();
   const mois = moisRestants(e.dateMariage);
   const aVenir = (e.mensuel || 0) * mois;
   const totalJJ = (e.solde || 0) + aVenir;
+  const expanded = epExpanded === null ? !(e.solde > 0) : epExpanded;
+
+  if (!expanded) {
+    return `<div class="card mc-click" style="display:flex;align-items:center;gap:10px" onclick="toggleEpargne()">
+      <div style="font-size:14px;font-weight:600">💰 Épargne</div>
+      <div style="flex:1;min-width:0;font-size:12px;color:var(--text-sec);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Compte ${eur2(e.solde || 0)} · jour J ${eur2(totalJJ)}</div>
+      <div style="font-size:13px;color:var(--purple-dark);font-weight:600;flex-shrink:0">Modifier ✏️</div>
+    </div>`;
+  }
+
   const recap = `<div style="margin-top:12px;font-size:13px;color:var(--text-sec);line-height:1.7">
     <div>Déjà sur le compte : <strong style="color:var(--text)">${eur2(e.solde || 0)}</strong></div>
     ${e.dateMariage
@@ -282,7 +294,7 @@ function renderEpargneCard() {
       : `<div style="color:var(--amber)">➕ Renseigne la date du mariage pour projeter l'épargne à venir.</div>`}
   </div>`;
   return `<div class="card">
-    <div class="card-title">💰 Épargne mariage</div>
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">💰 Épargne mariage <button onclick="toggleEpargne()" class="mclose" aria-label="Replier" style="font-size:13px">Replier ▲</button></div>
     <div class="fgrid">
       <div class="fi"><label>Solde actuel du compte (€)</label><input id="ep-solde" type="number" step="0.01" placeholder="0.00" value="${e.solde || ''}"></div>
       <div class="fi"><label>Épargne mensuelle (€)</label><input id="ep-mensuel" type="number" step="0.01" placeholder="0.00" value="${e.mensuel || ''}"></div>
@@ -418,12 +430,33 @@ window.setDepFilter = f => { depFilter = f; render(); };
 window.setDepSort   = s => { depSort = s; render(); };
 window.setRevSort   = s => { revSort = s; render(); };
 
-window.saveEpargne = () => {
+// Lit le formulaire épargne (s'il est déplié dans le DOM) vers data.epargne.
+function commitEpargneFromDOM() {
+  const sEl = document.getElementById('ep-solde');
+  if (!sEl) return false;
   const e = ensureEpargne();
-  e.solde       = parseFloat(document.getElementById('ep-solde').value) || 0;
+  e.solde       = parseFloat(sEl.value) || 0;
   e.mensuel     = parseFloat(document.getElementById('ep-mensuel').value) || 0;
   e.dateMariage = document.getElementById('ep-date').value || '';
-  render(); scheduleSave();
+  return true;
+}
+
+window.saveEpargne = () => {
+  if (!commitEpargneFromDOM()) return;
+  epExpanded = false; render(); scheduleSave();
+};
+
+// Replier enregistre d'abord la saisie en cours (comme pour les foyers).
+window.toggleEpargne = () => {
+  const e = ensureEpargne();
+  const expanded = epExpanded === null ? !(e.solde > 0) : epExpanded;
+  if (expanded) {
+    if (commitEpargneFromDOM()) scheduleSave();
+    epExpanded = false;
+  } else {
+    epExpanded = true;
+  }
+  render();
 };
 
 window.purgeEpargneRevenus = async () => {
