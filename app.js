@@ -87,16 +87,40 @@ function initials(n) {
 // ── Membres d'un foyer ───────────────────────────────────────────────────────
 // Chaque membre : { nom, type:'adulte'|'enfant', statut:'attente'|'confirme'|'decline' }
 // Migration à la volée des anciens foyers (qui n'avaient que des compteurs).
+// Découpe le nom d'un foyer en prénoms : "Laura, Gaëtan & Lise" → [Laura, Gaëtan, Lise]
+function nameTokens(nom) {
+  return String(nom || '').split(/\s*[,&]\s*/).map(s => s.trim()).filter(Boolean);
+}
+const isGenericName = n => !n || /^Adulte \d+$/.test(n) || /^Enfant \d+$/.test(n);
+
 function ensureMembres(f) {
-  if (Array.isArray(f.membres)) return f.membres;
-  const m = [];
-  const declined = f.rsvp === 'Décliné';
-  const ca = f.rsvp === 'Confirmé' ? (f.confAdultes != null ? f.confAdultes : f.adultes) : 0;
-  const ce = f.rsvp === 'Confirmé' ? (f.confEnfants != null ? f.confEnfants : f.enfants) : 0;
-  for (let i = 0; i < (f.adultes || 0); i++) m.push({ nom: 'Adulte ' + (i+1), type: 'adulte', statut: declined ? 'decline' : (i < ca ? 'confirme' : 'attente') });
-  for (let i = 0; i < (f.enfants || 0); i++) m.push({ nom: 'Enfant ' + (i+1), type: 'enfant', statut: declined ? 'decline' : (i < ce ? 'confirme' : 'attente') });
-  f.membres = m;
-  return m;
+  if (!Array.isArray(f.membres)) {
+    const declined = f.rsvp === 'Décliné';
+    const ca = f.rsvp === 'Confirmé' ? (f.confAdultes != null ? f.confAdultes : f.adultes) : 0;
+    const ce = f.rsvp === 'Confirmé' ? (f.confEnfants != null ? f.confEnfants : f.enfants) : 0;
+    const m = [];
+    for (let i = 0; i < (f.adultes || 0); i++) m.push({ nom: '', type: 'adulte', statut: declined ? 'decline' : (i < ca ? 'confirme' : 'attente') });
+    for (let i = 0; i < (f.enfants || 0); i++) m.push({ nom: '', type: 'enfant', statut: declined ? 'decline' : (i < ce ? 'confirme' : 'attente') });
+    f.membres = m;
+  }
+  // Déduit les prénoms à partir du nom du foyer pour les membres encore génériques
+  // (on ne touche pas au foyer placeholder ni aux noms déjà personnalisés).
+  if (f.nom && f.nom !== 'Nouveau foyer') {
+    const names = nameTokens(f.nom);
+    let ai = 0, ei = 0;
+    f.membres.forEach((mb, i) => {
+      const ord = mb.type === 'enfant' ? ++ei : ++ai;
+      if (isGenericName(mb.nom)) mb.nom = names[i] || (mb.type === 'enfant' ? 'Enfant ' + ord : 'Adulte ' + ord);
+    });
+  } else {
+    // Foyer placeholder : garde des libellés génériques lisibles
+    let ai = 0, ei = 0;
+    f.membres.forEach(mb => {
+      const ord = mb.type === 'enfant' ? ++ei : ++ai;
+      if (!mb.nom) mb.nom = mb.type === 'enfant' ? 'Enfant ' + ord : 'Adulte ' + ord;
+    });
+  }
+  return f.membres;
 }
 
 function foyerStats(f) {
