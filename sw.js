@@ -1,4 +1,4 @@
-const CACHE = 'mariage-v13';
+const CACHE = 'mariage-v16';
 const ASSETS = ['/mariage/', '/mariage/index.html', '/mariage/app.js', '/mariage/data.js', '/mariage/firebase.js', '/mariage/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -13,8 +13,16 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
+// Network-first : on tente le réseau, on met à jour le cache au passage, et on
+// retombe sur le cache hors ligne. Le cache runtime permet à SheetJS (export
+// Excel) et au SDK Firebase de fonctionner même sans connexion après 1ʳᵉ visite.
 self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    fetch(e.request).then(res => {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });

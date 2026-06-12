@@ -4,6 +4,7 @@ import { CATS, BUDGETS, GROUPES, DEFAULT_DATA } from './data.js';
 let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
 let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
 let invExpanded = null, invSearch = '';
+let depSort = 'echeance', revSort = 'date';
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -34,19 +35,26 @@ function scheduleSave() {
   setSyncBadge('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    saveTimer = null;
     try { await saveData(data); setSyncBadge('ok'); isOnline = true; }
     catch (e) { setSyncBadge('offline'); }
   }, 800);
 }
 
+// Applique une mise à jour distante, sauf si on a des modifications locales en
+// cours : une sauvegarde en attente (saveTimer) ou un foyer ouvert en édition.
+// Sans ce garde, le snapshot temps réel écraserait la saisie de l'utilisateur.
+function applyRemote(remote) {
+  if (saveTimer || invExpanded !== null) return;
+  data = remote;
+  isOnline = true;
+  setSyncBadge('ok');
+  render();
+}
+
 async function startListening() {
   setSyncBadge('loading');
-  listenData(remote => {
-    data = remote;
-    isOnline = true;
-    setSyncBadge('ok');
-    render();
-  });
+  listenData(applyRemote);
   if (!isConfigured) { setSyncBadge('ok'); return; }
   // Première connexion : si la base est vide, on l'amorce avec les données
   // initiales pour que tous les appareils partent du même point.
@@ -143,17 +151,47 @@ function foyerRsvp(f) {
 
 const STATUT_MAP = { 'Confirmé': 'confirme', 'En attente': 'attente', 'Décliné': 'decline' };
 
+// ── Épargne ────────────────────────────────────────────────────────────────
+// L'épargne est le SOLDE RÉEL du compte mariage (acomptes déjà payés déjà
+// déduits) + une projection des mensualités à venir jusqu'au mariage. Elle est
+// gérée à part des revenus (cadeaux/contributions), qui restent dans data.revenus.
+function ensureEpargne() {
+  // Valeurs par défaut pré-remplies (mariage le 10/07/2027, 300€/mois) ; il ne
+  // reste qu'à saisir le solde réel du compte.
+  if (!data.epargne || typeof data.epargne !== 'object') data.epargne = { solde: 0, mensuel: 300, dateMariage: '2027-07-10' };
+  return data.epargne;
+}
+
+// Nombre de mensualités restantes entre aujourd'hui et la date du mariage.
+function moisRestants(dateMariage) {
+  if (!dateMariage) return 0;
+  const w = new Date(dateMariage), n = new Date();
+  let m = (w.getFullYear() - n.getFullYear()) * 12 + (w.getMonth() - n.getMonth());
+  if (w.getDate() < n.getDate()) m -= 1; // mois entamé non compté
+  return Math.max(0, m);
+}
+
 function calcTotals() {
+  const e = ensureEpargne();
   const act = data.depenses.filter(d => !d.option && !d.offert);
+  const engage = act.reduce((s,d) => s + d.total, 0);
+  const paye   = act.reduce((s,d) => s + d.acompte + d.solde, 0);
+  const reste  = act.reduce((s,d) => s + Math.max(0, d.total - d.acompte - d.solde), 0);
+  // Dons/contributions : tout sauf l'ancien type « Épargne » (désormais géré à part)
+  const dons = data.revenus.filter(r => r.type !== 'Épargne');
+  const donsRecus  = dons.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
+  const donsAVenir = dons.filter(r => !r.date).reduce((s,r) => s + r.montant, 0);
+  const mois = moisRestants(e.dateMariage);
+  const epargneAVenir = (e.mensuel || 0) * mois;
+  const dispo  = (e.solde || 0) + donsRecus;     // argent disponible aujourd'hui
+  const aVenir = epargneAVenir + donsAVenir;      // entrées à venir d'ici le mariage
   return {
-    engage:     act.reduce((s,d) => s + d.total, 0),
-    paye:       act.reduce((s,d) => s + d.acompte + d.solde, 0),
-    reste:      act.reduce((s,d) => s + Math.max(0, d.total - d.acompte - d.solde), 0),
-    // Seuls les revenus reçus (avec date) comptent comme argent disponible
-    totalRev:   data.revenus.filter(r => r.date).reduce((s,r) => s + r.montant, 0),
-    revAttente: data.revenus.filter(r => !r.date).reduce((s,r) => s + r.montant, 0),
-    budgetTotal:Object.values(BUDGETS).reduce((a,b) => a + b, 0),
-    get solde() { return this.totalRev - this.engage; }
+    engage, paye, reste,
+    compte: e.solde || 0, donsRecus, donsAVenir, epargneAVenir,
+    mois, mensuel: e.mensuel || 0,
+    dispo, aVenir,
+    soldeJourJ: dispo + aVenir - reste,           // ce qu'il restera le jour J
+    budgetTotal: Object.values(BUDGETS).reduce((a,b) => a + b, 0)
   };
 }
 
@@ -185,37 +223,98 @@ function renderDashboard() {
     return `<div class="brow"><span class="bcat">${c}</span><div class="bwrap"><div class="bbar ${cls}" style="width:${Math.min(pct*100,100).toFixed(0)}%"></div></div><span class="bamt">${eur(eng)}/${eur(bud)}</span></div>`;
   }).join('');
   return `
-    <div class="hero"><div class="hero-lbl">Reste à dépenser</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Argent dispo ${eur(t.totalRev)} − Total dépenses ${eur(t.engage)}</div>${t.revAttente > 0 ? `<div class="hero-sub">💰 ${eur(t.revAttente)} en attente (non encore reçus)</div>` : ''}</div>
-    <div class="mg"><div class="mc"><div class="ml">Argent dispo</div><div class="mv green">${eur(t.totalRev)}</div></div><div class="mc"><div class="ml">Total dépenses</div><div class="mv purple">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv green">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
+    <div class="hero"><div class="hero-lbl">Reste à dépenser (le jour J)</div><div class="hero-val">${eur(t.soldeJourJ)}</div><div class="hero-sub">Dispo aujourd'hui ${eur(t.dispo)} + à venir ${eur(t.aVenir)} − reste à payer ${eur(t.reste)}</div>${t.epargneAVenir > 0 ? `<div class="hero-sub">📈 Dont ${eur(t.epargneAVenir)} d'épargne à venir (${eur(t.mensuel)}/mois × ${t.mois} mois)</div>` : ''}</div>
+    <div class="info-note">💡 L'épargne est le <strong>solde réel</strong> de ton compte mariage : les acomptes déjà payés en sont déjà déduits. « Reste à dépenser le jour J » = cet argent + l'épargne à venir − ce qu'il reste à payer. L'épargne se configure dans l'onglet <strong>Revenus</strong>.</div>
+    <div class="mg"><div class="mc"><div class="ml">Dispo aujourd'hui</div><div class="mv green">${eur(t.dispo)}</div></div><div class="mc"><div class="ml">À venir (épargne + dons)</div><div class="mv purple">${eur(t.aVenir)}</div></div><div class="mc"><div class="ml">Encore à payer</div><div class="mv red">${eur(t.reste)}</div></div><div class="mc"><div class="ml">Coût total mariage</div><div class="mv">${eur(t.engage)}</div></div></div>
     ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
     <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
 }
 
+// ── Tri ──────────────────────────────────────────────────────────────────────
+const reste = d => Math.max(0, d.total - d.acompte - d.solde);
+
+function sortDepenses(list) {
+  const arr = [...list];
+  if (depSort === 'montant')   arr.sort((a, b) => b.total - a.total);
+  else if (depSort === 'reste')arr.sort((a, b) => reste(b) - reste(a));
+  else if (depSort === 'cat')  arr.sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat));
+  else arr.sort((a, b) => (a.dateLimite || '9999-99-99').localeCompare(b.dateLimite || '9999-99-99')); // échéance
+  return arr;
+}
+
+function sortRevenus(list) {
+  const arr = [...list];
+  if (revSort === 'montant')      arr.sort((a, b) => b.montant - a.montant);
+  else if (revSort === 'statut')  arr.sort((a, b) => (a.date ? 0 : 1) - (b.date ? 0 : 1));
+  else arr.sort((a, b) => (b.date || '').localeCompare(a.date || '')); // date : reçus récents puis en attente
+  return arr;
+}
+
+const sortSelect = (id, val, opts) =>
+  `<div class="sortbar"><label>Trier&nbsp;:</label><select onchange="${id}(this.value)">${
+    opts.map(([v, lbl]) => `<option value="${v}"${val === v ? ' selected' : ''}>${lbl}</option>`).join('')
+  }</select></div>`;
+
 // ── Render Dépenses ──────────────────────────────────────────────────────────
 function renderDepenses() {
   const chips = ['Tout',...CATS].map(c => `<button class="chip${depFilter===c?' active':''}" onclick="setDepFilter('${c}')">${c}</button>`).join('');
-  const list = data.depenses.filter(d => depFilter === 'Tout' || d.cat === depFilter);
+  const list = sortDepenses(data.depenses.filter(d => depFilter === 'Tout' || d.cat === depFilter));
   const items = list.map(d => {
-    const s = statut(d), r = Math.max(0, d.total - d.acompte - d.solde);
+    const s = statut(d), r = reste(d);
     return `<div class="ditem" onclick="openDepModal(${d.id})"><div><div class="dname">${d.desc}</div><div class="dmeta">${d.cat}</div>${badgeDep(s)}</div><div><div class="damt">${eur2(d.total)}</div>${r > 0 ? `<div class="dreste">reste ${eur2(r)}</div>` : ''}</div></div>`;
   }).join('');
-  return `<button class="btn-primary" onclick="openDepModal()">+ Nouvelle dépense</button><div class="frow-chips">${chips}</div><div class="card">${items || '<div class="empty">Aucune dépense</div>'}</div>`;
+  const sort = sortSelect('setDepSort', depSort, [['echeance','Échéance la plus proche'],['montant','Montant (décroissant)'],['reste','Reste à payer (décroissant)'],['cat','Catégorie']]);
+  return `<button class="btn-primary" onclick="openDepModal()">+ Nouvelle dépense</button><div class="frow-chips">${chips}</div>${sort}<div class="card">${items || '<div class="empty">Aucune dépense</div>'}</div>`;
+}
+
+// Carte Épargne (solde réel du compte + projection des mensualités à venir).
+function renderEpargneCard() {
+  const e = ensureEpargne();
+  const mois = moisRestants(e.dateMariage);
+  const aVenir = (e.mensuel || 0) * mois;
+  const totalJJ = (e.solde || 0) + aVenir;
+  const recap = `<div style="margin-top:12px;font-size:13px;color:var(--text-sec);line-height:1.7">
+    <div>Déjà sur le compte : <strong style="color:var(--text)">${eur2(e.solde || 0)}</strong></div>
+    ${e.dateMariage
+      ? `<div>À venir : ${eur2(e.mensuel || 0)}/mois × ${mois} mois = <strong style="color:var(--text)">${eur2(aVenir)}</strong></div>
+         <div>Total le jour J : <strong style="color:var(--green)">${eur2(totalJJ)}</strong></div>`
+      : `<div style="color:var(--amber)">➕ Renseigne la date du mariage pour projeter l'épargne à venir.</div>`}
+  </div>`;
+  return `<div class="card">
+    <div class="card-title">💰 Épargne mariage</div>
+    <div class="fgrid">
+      <div class="fi"><label>Solde actuel du compte (€)</label><input id="ep-solde" type="number" step="0.01" placeholder="0.00" value="${e.solde || ''}"></div>
+      <div class="fi"><label>Épargne mensuelle (€)</label><input id="ep-mensuel" type="number" step="0.01" placeholder="0.00" value="${e.mensuel || ''}"></div>
+      <div class="fi full"><label>Date du mariage (pour la projection)</label><input id="ep-date" type="date" value="${e.dateMariage || ''}"></div>
+    </div>
+    <button class="btn-save" style="width:100%;margin-top:10px" onclick="saveEpargne()">Enregistrer l'épargne</button>
+    ${recap}
+  </div>`;
 }
 
 // ── Render Revenus ───────────────────────────────────────────────────────────
 function renderRevenus() {
-  const total = data.revenus.reduce((s,r) => s + r.montant, 0);
-  const recu  = data.revenus.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
+  const dons = data.revenus.filter(r => r.type !== 'Épargne');
+  const total = dons.reduce((s,r) => s + r.montant, 0);
+  const recu  = dons.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
   const attente = total - recu;
-  const items = data.revenus.map(r => `
+  const oldEp = data.revenus.filter(r => r.type === 'Épargne');
+  const hint = oldEp.length
+    ? `<div class="info-note">♻️ ${oldEp.length} ancienne(s) ligne(s) « Épargne » sont remplacées par le bloc ci-dessus. <span onclick="purgeEpargneRevenus()" style="cursor:pointer;color:var(--purple-dark);font-weight:600">Les supprimer</span></div>`
+    : '';
+  const items = sortRevenus(dons).map(r => `
     <div class="ritem" onclick="openRevModal(${r.id})">
       <div><div class="rname">${r.source}</div><div class="rmeta">${r.type}</div>${r.date ? '<span class="badge b-ok">Reçu</span>' : '<span class="badge b-warn">En attente</span>'}${r.rem ? ` <span class="badge b-gray">${escHtml(r.rem)}</span>` : ''}</div>
       <div class="rright"><div class="ramt">${eur2(r.montant)}</div>${r.date ? `<div class="rdate">${r.date.split('-').reverse().join('/')}</div>` : ''}</div>
     </div>`).join('');
-  return `<button class="btn-primary" onclick="openRevModal()">+ Nouveau revenu</button>
+  const sort = sortSelect('setRevSort', revSort, [['date','Date de réception'],['montant','Montant (décroissant)'],['statut','Reçus puis en attente']]);
+  return `${renderEpargneCard()}
+    <div class="stitle">Cadeaux & contributions</div>
+    <button class="btn-primary" onclick="openRevModal()">+ Nouveau revenu</button>
+    ${hint}
     <div class="mg"><div class="mc"><div class="ml">Total prévu</div><div class="mv">${eur(total)}</div></div><div class="mc"><div class="ml">Reçu</div><div class="mv green">${eur(recu)}</div></div><div class="mc"><div class="ml">En attente</div><div class="mv amber">${eur(attente)}</div></div></div>
-    <div class="card">${items || '<div class="empty">Aucun revenu</div>'}</div>`;
+    ${sort}<div class="card">${items || '<div class="empty">Aucun cadeau / contribution</div>'}</div>`;
 }
 
 // ── Render Invités ───────────────────────────────────────────────────────────
@@ -258,7 +357,7 @@ function renderInvites() {
   }).join('');
 
   return `<button class="btn-primary" onclick="addFoyer()">+ Nouveau foyer</button>
-    <div class="mg">
+    <div class="mg mg-4">
       ${statCard('Tous','Invités',totalPax,'purple')}
       ${statCard('Confirmé','Confirmés',confPax,'green')}
       ${statCard('En attente','En attente',attentePax,'amber')}
@@ -285,7 +384,7 @@ function renderFoyerExpand(f) {
   const mbrRow = (m) => `<div class="mbr" data-statut="${m.statut}" data-type="${m.type}">
       <input class="mbr-nom" value="${escAttr(m.nom)}" placeholder="${m.type==='enfant'?'Enfant':'Nom'}">
       ${seg(m.statut)}
-      <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer">🗑</button>
+      <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer" aria-label="Retirer ce membre">🗑</button>
     </div>`;
   return `<div class="expand">
     <div class="slbl">Informations</div>
@@ -316,9 +415,62 @@ function renderFoyerExpand(f) {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 window.setDepFilter = f => { depFilter = f; render(); };
+window.setDepSort   = s => { depSort = s; render(); };
+window.setRevSort   = s => { revSort = s; render(); };
+
+window.saveEpargne = () => {
+  const e = ensureEpargne();
+  e.solde       = parseFloat(document.getElementById('ep-solde').value) || 0;
+  e.mensuel     = parseFloat(document.getElementById('ep-mensuel').value) || 0;
+  e.dateMariage = document.getElementById('ep-date').value || '';
+  render(); scheduleSave();
+};
+
+window.purgeEpargneRevenus = async () => {
+  if (!await confirmModal("Supprimer les anciennes lignes « Épargne » de la liste des revenus ? Le bloc Épargne les remplace.")) return;
+  data.revenus = data.revenus.filter(r => r.type !== 'Épargne');
+  render(); scheduleSave();
+};
 window.setInvFilter = f => { invFilter = f; render(); };
 window.setInvStatus = s => { invStatus = (invStatus === s ? 'Tous' : s); render(); };
-window.toggleFoyer  = id => { invExpanded = invExpanded === id ? null : id; render(); };
+// Replier ou changer de foyer enregistre d'abord la saisie en cours (sinon les
+// modifications faites dans le formulaire déplié seraient perdues).
+window.toggleFoyer = id => {
+  if (invExpanded !== null && invExpanded !== id) commitOpenFoyer();
+  invExpanded = invExpanded === id ? (commitOpenFoyer(), null) : id;
+  render();
+};
+
+// Lit le formulaire déplié dans le DOM et le réinjecte dans data, puis planifie
+// une sauvegarde. Sans effet si aucun foyer n'est ouvert / présent dans le DOM.
+function commitOpenFoyer() {
+  if (invExpanded === null) return;
+  if (readFoyerFromDOM(invExpanded)) scheduleSave();
+}
+
+function readFoyerFromDOM(id) {
+  const f = data.foyers.find(x => x.id === id);
+  const fn = document.getElementById(`fn-${id}`);
+  if (!f || !fn) return false; // foyer absent ou formulaire pas dans le DOM
+  f.nom    = fn.value.trim() || f.nom;
+  f.groupe = document.getElementById(`fg-${id}`).value;
+  f.moment = document.getElementById(`fm-${id}`).value;
+  const rows = document.querySelectorAll(`#mlist-${id} .mbr`);
+  f.membres = Array.from(rows).map(row => ({
+    nom: row.querySelector('.mbr-nom').value.trim() || (row.dataset.type === 'enfant' ? 'Enfant' : 'Adulte'),
+    type: row.dataset.type === 'enfant' ? 'enfant' : 'adulte',
+    statut: row.dataset.statut || 'attente'
+  }));
+  // Compteurs dérivés (rétro-compat + export Excel)
+  f.adultes     = f.membres.filter(m => m.type === 'adulte').length;
+  f.enfants     = f.membres.filter(m => m.type === 'enfant').length;
+  f.confAdultes = f.membres.filter(m => m.type === 'adulte' && m.statut === 'confirme').length;
+  f.confEnfants = f.membres.filter(m => m.type === 'enfant' && m.statut === 'confirme').length;
+  f.rsvp        = foyerRsvp(f);
+  f.adresse = document.getElementById(`fadr-${id}`).value;
+  f.rem     = document.getElementById(`frem-${id}`).value;
+  return true;
+}
 
 // Recherche : on re-rend puis on restaure le focus + le curseur (sinon on perd
 // le focus à chaque frappe et on ne peut taper qu'un seul caractère).
@@ -356,7 +508,7 @@ window.addMbr = (foyerId, type) => {
       <button type="button" class="seg-b sb-c" onclick="setMbr(this,'confirme')" title="Confirmé">✓</button>
       <button type="button" class="seg-b sb-d" onclick="setMbr(this,'decline')" title="Décliné">✗</button>
     </div>
-    <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer">🗑</button>`;
+    <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer" aria-label="Retirer ce membre">🗑</button>`;
   list.appendChild(row);
 };
 
@@ -370,34 +522,18 @@ window.allMbr = (foyerId, statut) => {
 };
 
 window.saveFoyer = id => {
-  const f = data.foyers.find(x => x.id === id); if (!f) return;
-  f.nom    = document.getElementById(`fn-${id}`).value.trim() || f.nom;
-  f.groupe = document.getElementById(`fg-${id}`).value;
-  f.moment = document.getElementById(`fm-${id}`).value;
-  const rows = document.querySelectorAll(`#mlist-${id} .mbr`);
-  f.membres = Array.from(rows).map(row => ({
-    nom: row.querySelector('.mbr-nom').value.trim() || (row.dataset.type === 'enfant' ? 'Enfant' : 'Adulte'),
-    type: row.dataset.type === 'enfant' ? 'enfant' : 'adulte',
-    statut: row.dataset.statut || 'attente'
-  }));
-  // Compteurs dérivés (rétro-compat + export Excel)
-  f.adultes     = f.membres.filter(m => m.type === 'adulte').length;
-  f.enfants     = f.membres.filter(m => m.type === 'enfant').length;
-  f.confAdultes = f.membres.filter(m => m.type === 'adulte' && m.statut === 'confirme').length;
-  f.confEnfants = f.membres.filter(m => m.type === 'enfant' && m.statut === 'confirme').length;
-  f.rsvp        = foyerRsvp(f);
-  f.adresse = document.getElementById(`fadr-${id}`).value;
-  f.rem     = document.getElementById(`frem-${id}`).value;
+  if (!readFoyerFromDOM(id)) return;
   invExpanded = null; render(); scheduleSave();
 };
 
-window.deleteFoyer = id => {
-  if (!confirm('Supprimer ce foyer ?')) return;
+window.deleteFoyer = async id => {
+  if (!await confirmModal('Supprimer ce foyer et tous ses membres ?')) return;
   data.foyers = data.foyers.filter(f => f.id !== id);
   invExpanded = null; render(); scheduleSave();
 };
 
 window.addFoyer = () => {
+  commitOpenFoyer();
   const newId = Math.max(0, ...data.foyers.map(f => f.id)) + 1;
   data.foyers.unshift({id:newId,nom:"Nouveau foyer",groupe:"Amis Caro",moment:"Journée",adultes:2,enfants:0,rsvp:"En attente",confAdultes:null,confEnfants:null,adresse:"",rem:"",
     membres:[{nom:"Adulte 1",type:"adulte",statut:"attente"},{nom:"Adulte 2",type:"adulte",statut:"attente"}]});
@@ -408,59 +544,116 @@ window.addFoyer = () => {
 
 window.closeModal = () => { document.getElementById('modal-root').innerHTML = ''; };
 
+// Modale de confirmation (remplace confirm() natif, peu fiable en PWA iOS).
+// S'empile au-dessus d'une éventuelle modale ouverte sans la détruire.
+function confirmModal(message, { okLabel = 'Supprimer', danger = true } = {}) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'mbg';
+    el.style.zIndex = '300';
+    el.innerHTML = `<div class="modal" style="max-width:340px">
+      <div class="mtitle">Confirmation</div>
+      <div style="font-size:14px;color:var(--text);line-height:1.5;margin-bottom:18px">${escHtml(message)}</div>
+      <div class="btn-row">
+        <button class="btn-sec" id="cm-no" style="flex:1">Annuler</button>
+        <button class="${danger ? 'btn-del' : 'btn-save'}" id="cm-yes" style="flex:1">${escHtml(okLabel)}</button>
+      </div>
+    </div>`;
+    document.getElementById('modal-root').appendChild(el);
+    const close = val => { el.remove(); resolve(val); };
+    el.querySelector('#cm-no').onclick = () => close(false);
+    el.querySelector('#cm-yes').onclick = () => close(true);
+    el.addEventListener('click', e => { if (e.target === el) close(false); });
+  });
+}
+
 // ── Export Excel ─────────────────────────────────────────────────────────────
+// Génère le contenu CSV (séparateur « ; » pour Excel fr) d'un tableau d'objets.
+function toCSV(rows) {
+  if (!rows.length) return '';
+  const headers = Object.keys(rows[0]);
+  const esc = v => { const s = String(v ?? ''); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  return [headers.join(';'), ...rows.map(r => headers.map(h => esc(r[h])).join(';'))].join('\r\n');
+}
+
+// Télécharge un texte en fichier (BOM UTF-8 pour qu'Excel lise les accents).
+function downloadText(text, filename, mime) {
+  const blob = new Blob(['﻿' + text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 window.exportExcel = async () => {
   const btn = document.getElementById('export-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
+
+  // Données préparées en amont : réutilisées pour le repli CSV hors ligne.
+  const dep = data.depenses.map(d => ({
+    Description: d.desc,
+    Catégorie: d.cat,
+    'Montant total (€)': d.total,
+    'Acompte payé (€)': d.acompte,
+    'Solde payé (€)': d.solde,
+    'Reste à payer (€)': Math.max(0, d.total - d.acompte - d.solde),
+    Statut: statut(d),
+    'Date limite': d.dateLimite,
+    Remarque: d.rem
+  }));
+  const rev = data.revenus.filter(r => r.type !== 'Épargne').map(r => ({
+    Source: r.source,
+    Type: r.type,
+    'Montant (€)': r.montant,
+    'Date réception': r.date,
+    Reçu: r.date ? 'Oui' : 'Non',
+    Remarque: r.rem
+  }));
+  const e = ensureEpargne();
+  const moisR = moisRestants(e.dateMariage);
+  const ep = [{
+    'Solde actuel du compte (€)': e.solde || 0,
+    'Épargne mensuelle (€)': e.mensuel || 0,
+    'Date du mariage': e.dateMariage || '',
+    'Mois restants': moisR,
+    'Épargne à venir (€)': (e.mensuel || 0) * moisR,
+    'Total le jour J (€)': (e.solde || 0) + (e.mensuel || 0) * moisR
+  }];
+  const inv = data.foyers.map(f => {
+    const m = ensureMembres(f);
+    const st = foyerStats(f);
+    return {
+      Foyer: f.nom,
+      Groupe: f.groupe,
+      Moment: f.moment,
+      'Personnes invitées': st.total,
+      RSVP: foyerRsvp(f),
+      Confirmés: st.confirme,
+      'En attente': st.attente,
+      Déclinés: st.decline,
+      Membres: m.map(x => `${x.nom} (${x.statut === 'confirme' ? '✓' : x.statut === 'decline' ? '✗' : '?'})`).join(', '),
+      Adresse: f.adresse,
+      Remarque: f.rem
+    };
+  });
+
   try {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const wb = XLSX.utils.book_new();
-
-    const dep = data.depenses.map(d => ({
-      Description: d.desc,
-      Catégorie: d.cat,
-      'Montant total (€)': d.total,
-      'Acompte payé (€)': d.acompte,
-      'Solde payé (€)': d.solde,
-      'Reste à payer (€)': Math.max(0, d.total - d.acompte - d.solde),
-      Statut: statut(d),
-      'Date limite': d.dateLimite,
-      Remarque: d.rem
-    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ep), 'Épargne');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dep), 'Dépenses');
-
-    const rev = data.revenus.map(r => ({
-      Source: r.source,
-      Type: r.type,
-      'Montant (€)': r.montant,
-      'Date réception': r.date,
-      Reçu: r.date ? 'Oui' : 'Non',
-      Remarque: r.rem
-    }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rev), 'Revenus');
-
-    const inv = data.foyers.map(f => {
-      const m = ensureMembres(f);
-      const st = foyerStats(f);
-      return {
-        Foyer: f.nom,
-        Groupe: f.groupe,
-        Moment: f.moment,
-        'Personnes invitées': st.total,
-        RSVP: foyerRsvp(f),
-        Confirmés: st.confirme,
-        'En attente': st.attente,
-        Déclinés: st.decline,
-        Membres: m.map(x => `${x.nom} (${x.statut === 'confirme' ? '✓' : x.statut === 'decline' ? '✗' : '?'})`).join(', '),
-        Adresse: f.adresse,
-        Remarque: f.rem
-      };
-    });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), 'Invités');
-
     XLSX.writeFile(wb, `mariage-${today()}.xlsx`);
-  } catch (e) {
-    alert("Échec de l'export. Vérifiez votre connexion internet et réessayez.");
+  } catch (err) {
+    // Hors ligne ou CDN injoignable : repli sur un CSV (sans dépendance).
+    try {
+      const csv = ['=== ÉPARGNE ===', toCSV(ep), '', '=== DÉPENSES ===', toCSV(dep), '', '=== REVENUS ===', toCSV(rev), '', '=== INVITÉS ===', toCSV(inv)].join('\r\n');
+      downloadText(csv, `mariage-${today()}.csv`, 'text/csv;charset=utf-8;');
+    } catch (e2) {
+      alert("Échec de l'export.");
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '📊 Exporter vers Excel'; }
   }
@@ -470,7 +663,7 @@ window.openDepModal = (id = null) => {
   const d = id !== null ? data.depenses.find(x => x.id === id) : null;
   const cats = CATS.map(c => `<option${d && d.cat === c ? ' selected' : ''}>${c}</option>`).join('');
   document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
-    <div class="mtitle">${d ? 'Modifier la dépense' : 'Nouvelle dépense'} <button onclick="closeModal()" class="mclose">✕</button></div>
+    <div class="mtitle">${d ? 'Modifier la dépense' : 'Nouvelle dépense'} <button onclick="closeModal()" class="mclose" aria-label="Fermer">✕</button></div>
     <div class="mf"><label>Description</label><input id="md" type="text" placeholder="Ex: DJ soirée" value="${d ? escAttr(d.desc) : ''}"></div>
     <div class="mf"><label>Catégorie</label><select id="mc">${cats}</select></div>
     <div class="mf"><label>Montant total (€)</label><input id="mt" type="number" step="0.01" placeholder="0.00" value="${d ? d.total : ''}"></div>
@@ -516,19 +709,19 @@ window.saveDep = (id) => {
   closeModal(); render(); scheduleSave();
 };
 
-window.deleteDep = (id) => {
-  if (!confirm('Supprimer cette dépense ?')) return;
+window.deleteDep = async (id) => {
+  if (!await confirmModal('Supprimer cette dépense ?')) return;
   data.depenses = data.depenses.filter(d => d.id !== id);
   closeModal(); render(); scheduleSave();
 };
 
 window.openRevModal = (id = null) => {
   const r = id !== null ? data.revenus.find(x => x.id === id) : null;
-  const types = ['Épargne', 'Contribution famille', 'Liste de mariage', 'Autre'];
+  const types = ['Contribution famille', 'Liste de mariage', 'Cadeau', 'Autre'];
   const typeOpts = types.map(t => `<option${r && r.type === t ? ' selected' : ''}>${t}</option>`).join('');
   const recu = !!(r && r.date);
   document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
-    <div class="mtitle">${r ? 'Modifier le revenu' : 'Nouveau revenu'} <button onclick="closeModal()" class="mclose">✕</button></div>
+    <div class="mtitle">${r ? 'Modifier le revenu' : 'Nouveau revenu'} <button onclick="closeModal()" class="mclose" aria-label="Fermer">✕</button></div>
     <div class="mf"><label>Source</label><input id="rs" type="text" placeholder="Ex: Cadeau tante Marie" value="${r ? escAttr(r.source) : ''}"></div>
     <div class="mf"><label>Type</label><select id="rt">${typeOpts}</select></div>
     <div class="mf"><label>Montant (€)</label><input id="rm" type="number" step="0.01" placeholder="0.00" value="${r ? r.montant : ''}"></div>
@@ -575,8 +768,8 @@ window.saveRev = (id) => {
   closeModal(); render(); scheduleSave();
 };
 
-window.deleteRev = (id) => {
-  if (!confirm('Supprimer ce revenu ?')) return;
+window.deleteRev = async (id) => {
+  if (!await confirmModal('Supprimer ce revenu ?')) return;
   data.revenus = data.revenus.filter(r => r.id !== id);
   closeModal(); render(); scheduleSave();
 };
@@ -615,7 +808,7 @@ window.doLogin = async () => {
 };
 
 window.doLogout = async () => {
-  if (!confirm('Se déconnecter ?')) return;
+  if (!await confirmModal('Se déconnecter ?', { okLabel: 'Se déconnecter', danger: false })) return;
   await doSignOut();
 };
 
@@ -627,6 +820,8 @@ window.togglePrivacy = () => {
 };
 
 window.show = tab => {
+  // Quitter l'onglet Invités enregistre le foyer ouvert et le referme.
+  if (invExpanded !== null) { commitOpenFoyer(); invExpanded = null; }
   currentTab = tab;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');

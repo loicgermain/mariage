@@ -83,6 +83,14 @@
     .mv.green  { color: var(--green); }
     .mv.red    { color: var(--red); }
     .mv.amber  { color: var(--amber); }
+    /* Récap invités sur une seule ligne (4 colonnes) */
+    .mg.mg-4 { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; }
+    .mg.mg-4 .mc { padding: 10px 5px; text-align: center; }
+    .mg.mg-4 .ml { font-size: 10px; }
+    .mg.mg-4 .mv { font-size: 18px; }
+
+    /* Note explicative (dashboard) */
+    .info-note { background: var(--purple-light); color: var(--purple-text); font-size: 12px; line-height: 1.5; padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 10px; }
 
     /* Hero */
     .hero { background: var(--purple-dark); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 10px; color: #fff; }
@@ -140,6 +148,11 @@
     .frow-chips::-webkit-scrollbar { display: none; }
     .chip { font-size: 12px; padding: 5px 12px; border-radius: 999px; border: 0.5px solid var(--border-med); background: none; color: var(--text-sec); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
     .chip.active { background: var(--purple-light); color: var(--purple-text); border-color: var(--purple); }
+
+    /* Barre de tri */
+    .sortbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .sortbar label { font-size: 12px; color: var(--text-sec); flex-shrink: 0; }
+    .sortbar select { flex: 1; font-size: 13px; padding: 7px 9px; border-radius: var(--radius-sm); border: 0.5px solid var(--border-med); background: var(--card); color: var(--text); }
 
     /* Search */
     .search-wrap { position: relative; margin-bottom: 10px; }
@@ -243,9 +256,9 @@
     <div class="topbar-row">
       <div class="topbar-title">💍 Loïc & Caro</div>
       <div class="topbar-actions" id="topbar-actions" style="display:flex;gap:6px;align-items:center;">
-        <button id="privacy-btn" class="sync-badge sync-ok" onclick="togglePrivacy()" title="Mode discret">👁</button>
-        <button class="sync-badge sync-spin" id="sync-badge">↻ Chargement...</button>
-        <button class="sync-badge sync-err" id="logout-btn" onclick="doLogout()" title="Se déconnecter">⎋</button>
+        <button id="privacy-btn" class="sync-badge sync-ok" onclick="togglePrivacy()" title="Mode discret" aria-label="Activer/désactiver le mode discret">👁</button>
+        <button class="sync-badge sync-spin" id="sync-badge" aria-label="État de la synchronisation">↻ Chargement...</button>
+        <button class="sync-badge sync-err" id="logout-btn" onclick="doLogout()" title="Se déconnecter" aria-label="Se déconnecter">⎋</button>
       </div>
     </div>
     <div class="topbar-sub" id="topbar-sub">Budget mariage</div>
