@@ -74,6 +74,9 @@
     .card-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
     .mg { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-bottom: 10px; }
     .mc { background: var(--surface); border-radius: var(--radius-sm); padding: 11px 13px; }
+    .mc-click { cursor: pointer; transition: outline 0.1s; }
+    .mc-click:active { opacity: 0.6; }
+    .mc-active { outline: 2px solid var(--purple); outline-offset: -1px; }
     .ml { font-size: 11px; color: var(--text-sec); margin-bottom: 3px; }
     .mv { font-size: 20px; font-weight: 600; color: var(--text); }
     .mv.purple { color: var(--purple-dark); }

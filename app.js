@@ -2,7 +2,7 @@ import { saveData, listenData, loadOnce, isConfigured, onAuthChange, signIn, doS
 import { CATS, BUDGETS, GROUPES, DEFAULT_DATA } from './data.js';
 
 let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
-let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous';
+let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
 let invExpanded = null, invSearch = '';
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
@@ -90,7 +90,9 @@ function calcTotals() {
     engage:     act.reduce((s,d) => s + d.total, 0),
     paye:       act.reduce((s,d) => s + d.acompte + d.solde, 0),
     reste:      act.reduce((s,d) => s + Math.max(0, d.total - d.acompte - d.solde), 0),
-    totalRev:   data.revenus.reduce((s,r) => s + r.montant, 0),
+    // Seuls les revenus reçus (avec date) comptent comme argent disponible
+    totalRev:   data.revenus.filter(r => r.date).reduce((s,r) => s + r.montant, 0),
+    revAttente: data.revenus.filter(r => !r.date).reduce((s,r) => s + r.montant, 0),
     budgetTotal:Object.values(BUDGETS).reduce((a,b) => a + b, 0),
     get solde() { return this.totalRev - this.engage; }
   };
@@ -124,7 +126,7 @@ function renderDashboard() {
     return `<div class="brow"><span class="bcat">${c}</span><div class="bwrap"><div class="bbar ${cls}" style="width:${Math.min(pct*100,100).toFixed(0)}%"></div></div><span class="bamt">${eur(eng)}/${eur(bud)}</span></div>`;
   }).join('');
   return `
-    <div class="hero"><div class="hero-lbl">Reste à dépenser</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Argent dispo ${eur(t.totalRev)} − Total dépenses ${eur(t.engage)}</div></div>
+    <div class="hero"><div class="hero-lbl">Reste à dépenser</div><div class="hero-val">${eur(t.solde)}</div><div class="hero-sub">Argent dispo ${eur(t.totalRev)} − Total dépenses ${eur(t.engage)}</div>${t.revAttente > 0 ? `<div class="hero-sub">💰 ${eur(t.revAttente)} en attente (non encore reçus)</div>` : ''}</div>
     <div class="mg"><div class="mc"><div class="ml">Argent dispo</div><div class="mv green">${eur(t.totalRev)}</div></div><div class="mc"><div class="ml">Total dépenses</div><div class="mv purple">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv green">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
     ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
@@ -146,14 +148,15 @@ function renderDepenses() {
 function renderRevenus() {
   const total = data.revenus.reduce((s,r) => s + r.montant, 0);
   const recu  = data.revenus.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
+  const attente = total - recu;
   const items = data.revenus.map(r => `
     <div class="ritem" onclick="openRevModal(${r.id})">
-      <div><div class="rname">${r.source}</div><div class="rmeta">${r.type}</div>${r.rem ? `<span class="badge b-warn">${r.rem}</span>` : r.date ? '<span class="badge b-ok">Reçu</span>' : '<span class="badge b-gray">En attente</span>'}</div>
+      <div><div class="rname">${r.source}</div><div class="rmeta">${r.type}</div>${r.date ? '<span class="badge b-ok">Reçu</span>' : '<span class="badge b-warn">En attente</span>'}${r.rem ? ` <span class="badge b-gray">${escHtml(r.rem)}</span>` : ''}</div>
       <div class="rright"><div class="ramt">${eur2(r.montant)}</div>${r.date ? `<div class="rdate">${r.date.split('-').reverse().join('/')}</div>` : ''}</div>
     </div>`).join('');
   return `<button class="btn-primary" onclick="openRevModal()">+ Nouveau revenu</button>
-    <div class="mg"><div class="mc"><div class="ml">Total prévu</div><div class="mv green">${eur(total)}</div></div><div class="mc"><div class="ml">Reçu</div><div class="mv green">${eur(recu)}</div></div></div>
-    <div class="card">${items}</div>`;
+    <div class="mg"><div class="mc"><div class="ml">Total prévu</div><div class="mv">${eur(total)}</div></div><div class="mc"><div class="ml">Reçu</div><div class="mv green">${eur(recu)}</div></div><div class="mc"><div class="ml">En attente</div><div class="mv amber">${eur(attente)}</div></div></div>
+    <div class="card">${items || '<div class="empty">Aucun revenu</div>'}</div>`;
 }
 
 // ── Render Invités ───────────────────────────────────────────────────────────
@@ -161,10 +164,27 @@ function renderInvites() {
   const q = invSearch.toLowerCase();
   const filtered = data.foyers.filter(f =>
     (invFilter === 'Tous' || f.groupe === invFilter) &&
+    (invStatus === 'Tous' || f.rsvp === invStatus) &&
     (!q || f.nom.toLowerCase().includes(q) || (f.adresse||'').toLowerCase().includes(q))
   );
-  const confPax = data.foyers.filter(f => f.rsvp === 'Confirmé').reduce((s,f) =>
-    s + (f.confAdultes !== null ? f.confAdultes : f.adultes) + (f.confEnfants !== null ? f.confEnfants : f.enfants), 0);
+
+  // Compte en personnes (pas en foyers)
+  const invitedPax = f => f.adultes + f.enfants;
+  const confPaxF   = f => (f.confAdultes !== null ? f.confAdultes : f.adultes) + (f.confEnfants !== null ? f.confEnfants : f.enfants);
+  const sumPax = (sel, pred) => data.foyers.filter(pred).reduce((s,f) => s + sel(f), 0);
+
+  const totalPax    = sumPax(invitedPax, () => true);
+  const confPax     = sumPax(confPaxF,   f => f.rsvp === 'Confirmé');
+  const attentePax  = sumPax(invitedPax, f => f.rsvp === 'En attente');
+  const declinePax  = sumPax(invitedPax, f => f.rsvp === 'Décliné');
+  const journeeInv  = sumPax(invitedPax, f => f.moment === 'Journée');
+  const soireeInv   = sumPax(invitedPax, f => f.moment === 'Soirée');
+  const journeeConf = sumPax(confPaxF,   f => f.moment === 'Journée' && f.rsvp === 'Confirmé');
+  const soireeConf  = sumPax(confPaxF,   f => f.moment === 'Soirée'  && f.rsvp === 'Confirmé');
+
+  const statCard = (status, label, val, color) =>
+    `<div class="mc mc-click${invStatus===status?' mc-active':''}" onclick="setInvStatus('${status}')"><div class="ml">${label}</div><div class="mv ${color}">${val}</div></div>`;
+
   const chips = ['Tous',...GROUPES].map(g => `<button class="chip${invFilter===g?' active':''}" onclick="setInvFilter('${g}')">${g}</button>`).join('');
   const cards = filtered.map(f => {
     const pax = f.adultes + 'A' + (f.enfants ? ' ' + f.enfants + 'E' : '');
@@ -178,8 +198,20 @@ function renderInvites() {
       ${invExpanded === f.id ? renderFoyerExpand(f) : ''}
     </div>`;
   }).join('');
+
   return `<button class="btn-primary" onclick="addFoyer()">+ Nouveau foyer</button>
-    <div class="mg"><div class="mc"><div class="ml">Foyers</div><div class="mv purple">${data.foyers.length}</div></div><div class="mc"><div class="ml">Confirmés</div><div class="mv green">${confPax}</div></div><div class="mc"><div class="ml">Foyers confirmés</div><div class="mv green">${data.foyers.filter(f=>f.rsvp==='Confirmé').length}</div></div><div class="mc"><div class="ml">En attente</div><div class="mv amber">${data.foyers.filter(f=>f.rsvp==='En attente').length}</div></div></div>
+    <div class="mg">
+      ${statCard('Tous','Invités',totalPax,'purple')}
+      ${statCard('Confirmé','Confirmés',confPax,'green')}
+      ${statCard('En attente','En attente',attentePax,'amber')}
+      ${statCard('Décliné','Déclinés',declinePax,'red')}
+    </div>
+    <div class="card" style="display:flex;gap:12px;text-align:center;align-items:center">
+      <div style="flex:1"><div class="ml">☀️ Journée</div><div class="mv">${journeeInv}</div><div style="font-size:11px;color:var(--green)">✓ ${journeeConf} confirmés</div></div>
+      <div style="width:1px;align-self:stretch;background:var(--border)"></div>
+      <div style="flex:1"><div class="ml">🌙 Soirée</div><div class="mv">${soireeInv}</div><div style="font-size:11px;color:var(--green)">✓ ${soireeConf} confirmés</div></div>
+    </div>
+    ${invStatus !== 'Tous' ? `<div class="stitle">Filtré : ${invStatus} · <span onclick="setInvStatus('Tous')" style="cursor:pointer;color:var(--purple)">tout afficher</span></div>` : ''}
     <div class="search-wrap"><span class="si">🔍</span><input type="text" placeholder="Rechercher..." value="${invSearch}" oninput="invSearch=this.value;render()"></div>
     <div class="frow-chips">${chips}</div>
     ${cards || '<div class="empty">Aucun foyer trouvé</div>'}`;
@@ -230,8 +262,29 @@ function renderFoyerExpand(f) {
 // ── Actions ──────────────────────────────────────────────────────────────────
 window.setDepFilter = f => { depFilter = f; render(); };
 window.setInvFilter = f => { invFilter = f; render(); };
+window.setInvStatus = s => { invStatus = (invStatus === s ? 'Tous' : s); render(); };
 window.toggleFoyer  = id => { invExpanded = invExpanded === id ? null : id; render(); };
-window.toggleCB     = (id,val) => { const b = document.getElementById(`cb-${id}`); if(b) b.style.display = val === 'Confirmé' ? '' : 'none'; };
+
+// Au changement de RSVP : pré-remplir les présents avec les valeurs invitées
+// (Confirmé) ou 0 (Décliné), pour éviter de tout retaper.
+window.toggleCB = (id, val) => {
+  const box = document.getElementById(`cb-${id}`);
+  const fca = document.getElementById(`fca-${id}`);
+  const fce = document.getElementById(`fce-${id}`);
+  const fa  = document.getElementById(`fa-${id}`);
+  const fe  = document.getElementById(`fe-${id}`);
+  if (val === 'Confirmé') {
+    if (box) box.style.display = '';
+    if (fca && fa) fca.value = fa.value;
+    if (fce && fe) fce.value = fe.value;
+  } else if (val === 'Décliné') {
+    if (box) box.style.display = 'none';
+    if (fca) fca.value = 0;
+    if (fce) fce.value = 0;
+  } else {
+    if (box) box.style.display = 'none';
+  }
+};
 
 window.saveFoyer = id => {
   const f = data.foyers.find(x => x.id === id); if (!f) return;
@@ -379,14 +432,18 @@ window.openRevModal = (id = null) => {
   const r = id !== null ? data.revenus.find(x => x.id === id) : null;
   const types = ['Épargne', 'Contribution famille', 'Liste de mariage', 'Autre'];
   const typeOpts = types.map(t => `<option${r && r.type === t ? ' selected' : ''}>${t}</option>`).join('');
+  const recu = !!(r && r.date);
   document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
     <div class="mtitle">${r ? 'Modifier le revenu' : 'Nouveau revenu'} <button onclick="closeModal()" class="mclose">✕</button></div>
     <div class="mf"><label>Source</label><input id="rs" type="text" placeholder="Ex: Cadeau tante Marie" value="${r ? escAttr(r.source) : ''}"></div>
     <div class="mf"><label>Type</label><select id="rt">${typeOpts}</select></div>
     <div class="mf"><label>Montant (€)</label><input id="rm" type="number" step="0.01" placeholder="0.00" value="${r ? r.montant : ''}"></div>
-    <div class="mf"><label>Date réception</label><input id="rd" type="date" value="${r ? r.date : ''}"></div>
-    <button type="button" class="btn-sec" style="width:100%;margin-bottom:12px" onclick="markRecu()">✓ Marquer reçu aujourd'hui</button>
-    <div class="mf"><label>Remarque</label><input id="rr" type="text" placeholder="Ex: Non reçu" value="${r ? escAttr(r.rem) : ''}"></div>
+    <div class="mf"><label>Statut</label><select id="rstatus" onchange="toggleRevDate(this.value)">
+      <option${!recu ? ' selected' : ''}>En attente</option>
+      <option${recu ? ' selected' : ''}>Reçu</option>
+    </select></div>
+    <div class="mf" id="rd-row" style="${recu ? '' : 'display:none'}"><label>Date de réception</label><input id="rd" type="date" value="${r ? r.date : ''}"></div>
+    <div class="mf"><label>Remarque</label><input id="rr" type="text" placeholder="Optionnel..." value="${r ? escAttr(r.rem) : ''}"></div>
     <div class="btn-row">
       ${r ? `<button class="btn-del" onclick="deleteRev(${r.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
       <button class="btn-save" onclick="saveRev(${r ? r.id : 'null'})">Enregistrer</button>
@@ -394,15 +451,24 @@ window.openRevModal = (id = null) => {
   </div></div>`;
 };
 
-window.markRecu = () => { document.getElementById('rd').value = today(); };
+window.toggleRevDate = (val) => {
+  const row = document.getElementById('rd-row');
+  const rd = document.getElementById('rd');
+  if (val === 'Reçu') { row.style.display = ''; if (!rd.value) rd.value = today(); }
+  else { row.style.display = 'none'; }
+};
 
 window.saveRev = (id) => {
   const src = document.getElementById('rs').value.trim(); if (!src) return;
+  const recu = document.getElementById('rstatus').value === 'Reçu';
+  let date = document.getElementById('rd').value || '';
+  if (!recu) date = '';
+  else if (!date) date = today();
   const fields = {
     source: src,
     type: document.getElementById('rt').value,
     montant: parseFloat(document.getElementById('rm').value) || 0,
-    date: document.getElementById('rd').value || '',
+    date: date,
     rem: document.getElementById('rr').value
   };
   if (id === null) {
