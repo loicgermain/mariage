@@ -168,6 +168,19 @@
     .conf-box   { background: var(--surface); border-radius: var(--radius-sm); padding: 10px 12px; margin-top: 8px; }
     .conf-title { font-size: 12px; color: var(--text-sec); margin-bottom: 8px; }
 
+    /* Membres d'un foyer */
+    .mbr { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+    .mbr-nom { flex: 1; min-width: 0; font-size: 13px; padding: 8px 9px; border-radius: var(--radius-sm); border: 0.5px solid var(--border-med); background: var(--card); color: var(--text); }
+    .seg { display: flex; border: 0.5px solid var(--border-med); border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; }
+    .seg-b { width: 34px; padding: 8px 0; border: none; border-left: 0.5px solid var(--border-med); background: var(--card); color: var(--text-sec); font-size: 13px; cursor: pointer; }
+    .seg-b:first-child { border-left: none; }
+    .seg-b.sb-a.on { background: var(--surface); color: var(--text); }
+    .seg-b.sb-c.on { background: var(--green); color: #fff; }
+    .seg-b.sb-d.on { background: #E24B4A; color: #fff; }
+    .mbr-del { background: none; border: none; cursor: pointer; font-size: 14px; opacity: .55; flex-shrink: 0; padding: 2px; }
+    .mbr-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .mbr-actions .btn-sec { flex: 1; padding: 8px 6px; font-size: 12px; min-width: 72px; }
+
     /* Buttons */
     .btn-primary { width: 100%; background: var(--purple); color: #fff; border: none; border-radius: var(--radius-sm); padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
     .btn-row  { display: flex; gap: 7px; margin-top: 10px; }

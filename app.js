@@ -84,6 +84,41 @@ function initials(n) {
   return n.split(/[\s&,]+/).filter(Boolean).slice(0,2).map(w => w[0].toUpperCase()).join('');
 }
 
+// ── Membres d'un foyer ───────────────────────────────────────────────────────
+// Chaque membre : { nom, type:'adulte'|'enfant', statut:'attente'|'confirme'|'decline' }
+// Migration à la volée des anciens foyers (qui n'avaient que des compteurs).
+function ensureMembres(f) {
+  if (Array.isArray(f.membres)) return f.membres;
+  const m = [];
+  const declined = f.rsvp === 'Décliné';
+  const ca = f.rsvp === 'Confirmé' ? (f.confAdultes != null ? f.confAdultes : f.adultes) : 0;
+  const ce = f.rsvp === 'Confirmé' ? (f.confEnfants != null ? f.confEnfants : f.enfants) : 0;
+  for (let i = 0; i < (f.adultes || 0); i++) m.push({ nom: 'Adulte ' + (i+1), type: 'adulte', statut: declined ? 'decline' : (i < ca ? 'confirme' : 'attente') });
+  for (let i = 0; i < (f.enfants || 0); i++) m.push({ nom: 'Enfant ' + (i+1), type: 'enfant', statut: declined ? 'decline' : (i < ce ? 'confirme' : 'attente') });
+  f.membres = m;
+  return m;
+}
+
+function foyerStats(f) {
+  const m = ensureMembres(f);
+  return {
+    total:    m.length,
+    confirme: m.filter(x => x.statut === 'confirme').length,
+    decline:  m.filter(x => x.statut === 'decline').length,
+    attente:  m.filter(x => x.statut === 'attente').length
+  };
+}
+
+// Statut global du foyer, déduit de ses membres
+function foyerRsvp(f) {
+  const s = foyerStats(f);
+  if (s.total > 0 && s.decline === s.total) return 'Décliné';
+  if (s.confirme > 0) return 'Confirmé';
+  return 'En attente';
+}
+
+const STATUT_MAP = { 'Confirmé': 'confirme', 'En attente': 'attente', 'Décliné': 'decline' };
+
 function calcTotals() {
   const act = data.depenses.filter(d => !d.option && !d.offert);
   return {
@@ -162,38 +197,37 @@ function renderRevenus() {
 // ── Render Invités ───────────────────────────────────────────────────────────
 function renderInvites() {
   const q = invSearch.toLowerCase();
+  const statutF = STATUT_MAP[invStatus];
   const filtered = data.foyers.filter(f =>
     (invFilter === 'Tous' || f.groupe === invFilter) &&
-    (invStatus === 'Tous' || f.rsvp === invStatus) &&
-    (!q || f.nom.toLowerCase().includes(q) || (f.adresse||'').toLowerCase().includes(q))
+    (invStatus === 'Tous' || ensureMembres(f).some(m => m.statut === statutF)) &&
+    (!q || f.nom.toLowerCase().includes(q) || (f.adresse||'').toLowerCase().includes(q)
+        || ensureMembres(f).some(m => m.nom.toLowerCase().includes(q)))
   );
 
-  // Compte en personnes (pas en foyers)
-  const invitedPax = f => f.adultes + f.enfants;
-  const confPaxF   = f => (f.confAdultes !== null ? f.confAdultes : f.adultes) + (f.confEnfants !== null ? f.confEnfants : f.enfants);
-  const sumPax = (sel, pred) => data.foyers.filter(pred).reduce((s,f) => s + sel(f), 0);
-
-  const totalPax    = sumPax(invitedPax, () => true);
-  const confPax     = sumPax(confPaxF,   f => f.rsvp === 'Confirmé');
-  const attentePax  = sumPax(invitedPax, f => f.rsvp === 'En attente');
-  const declinePax  = sumPax(invitedPax, f => f.rsvp === 'Décliné');
-  const journeeInv  = sumPax(invitedPax, f => f.moment === 'Journée');
-  const soireeInv   = sumPax(invitedPax, f => f.moment === 'Soirée');
-  const journeeConf = sumPax(confPaxF,   f => f.moment === 'Journée' && f.rsvp === 'Confirmé');
-  const soireeConf  = sumPax(confPaxF,   f => f.moment === 'Soirée'  && f.rsvp === 'Confirmé');
+  // Compte en personnes, à partir des membres
+  const sumPax = (sel, pred) => data.foyers.filter(pred).reduce((s,f) => s + sel(foyerStats(f)), 0);
+  const totalPax    = sumPax(s => s.total,    () => true);
+  const confPax     = sumPax(s => s.confirme, () => true);
+  const attentePax  = sumPax(s => s.attente,  () => true);
+  const declinePax  = sumPax(s => s.decline,  () => true);
+  const journeeInv  = sumPax(s => s.total,    f => f.moment === 'Journée');
+  const soireeInv   = sumPax(s => s.total,    f => f.moment === 'Soirée');
+  const journeeConf = sumPax(s => s.confirme, f => f.moment === 'Journée');
+  const soireeConf  = sumPax(s => s.confirme, f => f.moment === 'Soirée');
 
   const statCard = (status, label, val, color) =>
     `<div class="mc mc-click${invStatus===status?' mc-active':''}" onclick="setInvStatus('${status}')"><div class="ml">${label}</div><div class="mv ${color}">${val}</div></div>`;
 
   const chips = ['Tous',...GROUPES].map(g => `<button class="chip${invFilter===g?' active':''}" onclick="setInvFilter('${g}')">${g}</button>`).join('');
   const cards = filtered.map(f => {
-    const pax = f.adultes + 'A' + (f.enfants ? ' ' + f.enfants + 'E' : '');
-    const cs = f.rsvp === 'Confirmé' ? (f.confAdultes !== null ? f.confAdultes : f.adultes) + 'A' + ((f.confEnfants !== null ? f.confEnfants : f.enfants) ? ' ' + (f.confEnfants !== null ? f.confEnfants : f.enfants) + 'E' : '') : '';
+    const s = foyerStats(f);
+    const breakdown = [s.confirme ? `<span style="color:var(--green)">✓${s.confirme}</span>` : '', s.attente ? `<span style="color:var(--amber)">?${s.attente}</span>` : '', s.decline ? `<span style="color:var(--red)">✗${s.decline}</span>` : ''].filter(Boolean).join(' ');
     return `<div class="fcard">
       <div class="fhdr" onclick="toggleFoyer(${f.id})">
         <div class="avatar">${initials(f.nom)}</div>
-        <div class="finfo"><div class="fname">${f.nom}</div><div class="fmeta">${f.groupe} · ${pax}${cs ? ` · <span class="conf-count">✓ ${cs}</span>` : ''}</div></div>
-        <div class="fright">${badgeRsvp(f.rsvp)}<span class="badge b-purple">${f.moment}</span></div>
+        <div class="finfo"><div class="fname">${f.nom}</div><div class="fmeta">${f.groupe} · ${s.total} pers. · ${breakdown}</div></div>
+        <div class="fright">${badgeRsvp(foyerRsvp(f))}<span class="badge b-purple">${f.moment}</span></div>
       </div>
       ${invExpanded === f.id ? renderFoyerExpand(f) : ''}
     </div>`;
@@ -212,45 +246,42 @@ function renderInvites() {
       <div style="flex:1"><div class="ml">🌙 Soirée</div><div class="mv">${soireeInv}</div><div style="font-size:11px;color:var(--green)">✓ ${soireeConf} confirmés</div></div>
     </div>
     ${invStatus !== 'Tous' ? `<div class="stitle">Filtré : ${invStatus} · <span onclick="setInvStatus('Tous')" style="cursor:pointer;color:var(--purple)">tout afficher</span></div>` : ''}
-    <div class="search-wrap"><span class="si">🔍</span><input type="text" placeholder="Rechercher..." value="${invSearch}" oninput="invSearch=this.value;render()"></div>
+    <div class="search-wrap"><span class="si">🔍</span><input type="text" placeholder="Rechercher un foyer ou une personne..." value="${escAttr(invSearch)}" oninput="onInvSearch(this.value)"></div>
     <div class="frow-chips">${chips}</div>
     ${cards || '<div class="empty">Aucun foyer trouvé</div>'}`;
 }
 
 function renderFoyerExpand(f) {
-  const sc = f.rsvp === 'Confirmé';
-  const ca = f.confAdultes !== null ? f.confAdultes : f.adultes;
-  const ce = f.confEnfants !== null ? f.confEnfants : f.enfants;
+  const membres = ensureMembres(f);
+  const seg = (statut) => `<div class="seg">
+      <button type="button" class="seg-b sb-a${statut==='attente'?' on':''}" onclick="setMbr(this,'attente')" title="En attente">?</button>
+      <button type="button" class="seg-b sb-c${statut==='confirme'?' on':''}" onclick="setMbr(this,'confirme')" title="Confirmé">✓</button>
+      <button type="button" class="seg-b sb-d${statut==='decline'?' on':''}" onclick="setMbr(this,'decline')" title="Décliné">✗</button>
+    </div>`;
+  const mbrRow = (m) => `<div class="mbr" data-statut="${m.statut}" data-type="${m.type}">
+      <input class="mbr-nom" value="${escAttr(m.nom)}" placeholder="${m.type==='enfant'?'Enfant':'Nom'}">
+      ${seg(m.statut)}
+      <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer">🗑</button>
+    </div>`;
   return `<div class="expand">
     <div class="slbl">Informations</div>
     <div class="fgrid">
-      <div class="fi full"><label>Nom du foyer</label><input id="fn-${f.id}" value="${f.nom}"></div>
+      <div class="fi full"><label>Nom du foyer</label><input id="fn-${f.id}" value="${escAttr(f.nom)}"></div>
       <div class="fi"><label>Groupe</label><select id="fg-${f.id}">${GROUPES.map(g=>`<option${f.groupe===g?' selected':''}>${g}</option>`).join('')}</select></div>
       <div class="fi"><label>Moment</label><select id="fm-${f.id}"><option${f.moment==='Journée'?' selected':''}>Journée</option><option${f.moment==='Soirée'?' selected':''}>Soirée</option></select></div>
-      <div class="fi"><label>Adultes invités</label><input id="fa-${f.id}" type="number" min="0" max="30" value="${f.adultes}"></div>
-      <div class="fi"><label>Enfants invités</label><input id="fe-${f.id}" type="number" min="0" max="20" value="${f.enfants}"></div>
     </div>
-    <div class="slbl">RSVP</div>
-    <div class="fgrid">
-      <div class="fi full"><label>Statut</label>
-        <select id="fr-${f.id}" onchange="toggleCB(${f.id},this.value)">
-          <option${f.rsvp==='En attente'?' selected':''}>En attente</option>
-          <option${f.rsvp==='Confirmé'?' selected':''}>Confirmé</option>
-          <option${f.rsvp==='Décliné'?' selected':''}>Décliné</option>
-        </select>
-      </div>
-    </div>
-    <div id="cb-${f.id}" class="conf-box" style="${sc?'':'display:none'}">
-      <div class="conf-title">Personnes qui viennent réellement</div>
-      <div class="fgrid">
-        <div class="fi"><label>Adultes confirmés</label><input id="fca-${f.id}" type="number" min="0" max="30" value="${ca}"></div>
-        <div class="fi"><label>Enfants confirmés</label><input id="fce-${f.id}" type="number" min="0" max="20" value="${ce}"></div>
-      </div>
+    <div class="slbl">Membres &amp; présence</div>
+    <div id="mlist-${f.id}">${membres.map(mbrRow).join('')}</div>
+    <div class="mbr-actions">
+      <button type="button" class="btn-sec" onclick="addMbr(${f.id},'adulte')">+ Adulte</button>
+      <button type="button" class="btn-sec" onclick="addMbr(${f.id},'enfant')">+ Enfant</button>
+      <button type="button" class="btn-sec" onclick="allMbr(${f.id},'confirme')">✓ Tous</button>
+      <button type="button" class="btn-sec" onclick="allMbr(${f.id},'decline')">✗ Tous</button>
     </div>
     <div class="slbl">Contact</div>
     <div class="fgrid">
-      <div class="fi full"><label>Adresse postale</label><textarea id="fadr-${f.id}" placeholder="Rue, code postal, ville">${f.adresse||''}</textarea></div>
-      <div class="fi full"><label>Remarque</label><input id="frem-${f.id}" type="text" value="${f.rem||''}" placeholder="Optionnel..."></div>
+      <div class="fi full"><label>Adresse postale</label><textarea id="fadr-${f.id}" placeholder="Rue, code postal, ville">${escHtml(f.adresse||'')}</textarea></div>
+      <div class="fi full"><label>Remarque</label><input id="frem-${f.id}" type="text" value="${escAttr(f.rem||'')}" placeholder="Optionnel..."></div>
     </div>
     <div class="btn-row">
       <button class="btn-del" onclick="deleteFoyer(${f.id})">🗑 Supprimer</button>
@@ -265,39 +296,72 @@ window.setInvFilter = f => { invFilter = f; render(); };
 window.setInvStatus = s => { invStatus = (invStatus === s ? 'Tous' : s); render(); };
 window.toggleFoyer  = id => { invExpanded = invExpanded === id ? null : id; render(); };
 
-// Au changement de RSVP : pré-remplir les présents avec les valeurs invitées
-// (Confirmé) ou 0 (Décliné), pour éviter de tout retaper.
-window.toggleCB = (id, val) => {
-  const box = document.getElementById(`cb-${id}`);
-  const fca = document.getElementById(`fca-${id}`);
-  const fce = document.getElementById(`fce-${id}`);
-  const fa  = document.getElementById(`fa-${id}`);
-  const fe  = document.getElementById(`fe-${id}`);
-  if (val === 'Confirmé') {
-    if (box) box.style.display = '';
-    if (fca && fa) fca.value = fa.value;
-    if (fce && fe) fce.value = fe.value;
-  } else if (val === 'Décliné') {
-    if (box) box.style.display = 'none';
-    if (fca) fca.value = 0;
-    if (fce) fce.value = 0;
-  } else {
-    if (box) box.style.display = 'none';
-  }
+// Recherche : on re-rend puis on restaure le focus + le curseur (sinon on perd
+// le focus à chaque frappe et on ne peut taper qu'un seul caractère).
+window.onInvSearch = (val) => {
+  invSearch = val;
+  render();
+  const el = document.querySelector('.search-wrap input');
+  if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
+};
+
+// ── Membres d'un foyer (édition DOM, sauvegardée via « Enregistrer ») ─────────
+const SEG_CLS = { attente: 'sb-a', confirme: 'sb-c', decline: 'sb-d' };
+
+window.setMbr = (btn, statut) => {
+  const row = btn.closest('.mbr');
+  row.dataset.statut = statut;
+  row.querySelectorAll('.seg-b').forEach(b => b.classList.remove('on'));
+  const active = row.querySelector('.' + SEG_CLS[statut]);
+  if (active) active.classList.add('on');
+};
+
+window.delMbr = (btn) => { btn.closest('.mbr').remove(); };
+
+window.addMbr = (foyerId, type) => {
+  const list = document.getElementById('mlist-' + foyerId);
+  if (!list) return;
+  const n = list.querySelectorAll(`.mbr[data-type="${type}"]`).length + 1;
+  const row = document.createElement('div');
+  row.className = 'mbr';
+  row.dataset.statut = 'attente';
+  row.dataset.type = type;
+  row.innerHTML = `<input class="mbr-nom" value="${(type === 'enfant' ? 'Enfant ' : 'Adulte ') + n}" placeholder="Nom">
+    <div class="seg">
+      <button type="button" class="seg-b sb-a on" onclick="setMbr(this,'attente')" title="En attente">?</button>
+      <button type="button" class="seg-b sb-c" onclick="setMbr(this,'confirme')" title="Confirmé">✓</button>
+      <button type="button" class="seg-b sb-d" onclick="setMbr(this,'decline')" title="Décliné">✗</button>
+    </div>
+    <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer">🗑</button>`;
+  list.appendChild(row);
+};
+
+window.allMbr = (foyerId, statut) => {
+  const list = document.getElementById('mlist-' + foyerId);
+  if (!list) return;
+  list.querySelectorAll('.mbr').forEach(row => {
+    const b = row.querySelector('.' + SEG_CLS[statut]);
+    if (b) window.setMbr(b, statut);
+  });
 };
 
 window.saveFoyer = id => {
   const f = data.foyers.find(x => x.id === id); if (!f) return;
-  f.nom     = document.getElementById(`fn-${id}`).value.trim() || f.nom;
-  f.groupe  = document.getElementById(`fg-${id}`).value;
-  f.moment  = document.getElementById(`fm-${id}`).value;
-  f.adultes = parseInt(document.getElementById(`fa-${id}`).value) || 0;
-  f.enfants = parseInt(document.getElementById(`fe-${id}`).value) || 0;
-  f.rsvp    = document.getElementById(`fr-${id}`).value;
-  if (f.rsvp === 'Confirmé') {
-    f.confAdultes = parseInt(document.getElementById(`fca-${id}`).value) || 0;
-    f.confEnfants = parseInt(document.getElementById(`fce-${id}`).value) || 0;
-  } else { f.confAdultes = null; f.confEnfants = null; }
+  f.nom    = document.getElementById(`fn-${id}`).value.trim() || f.nom;
+  f.groupe = document.getElementById(`fg-${id}`).value;
+  f.moment = document.getElementById(`fm-${id}`).value;
+  const rows = document.querySelectorAll(`#mlist-${id} .mbr`);
+  f.membres = Array.from(rows).map(row => ({
+    nom: row.querySelector('.mbr-nom').value.trim() || (row.dataset.type === 'enfant' ? 'Enfant' : 'Adulte'),
+    type: row.dataset.type === 'enfant' ? 'enfant' : 'adulte',
+    statut: row.dataset.statut || 'attente'
+  }));
+  // Compteurs dérivés (rétro-compat + export Excel)
+  f.adultes     = f.membres.filter(m => m.type === 'adulte').length;
+  f.enfants     = f.membres.filter(m => m.type === 'enfant').length;
+  f.confAdultes = f.membres.filter(m => m.type === 'adulte' && m.statut === 'confirme').length;
+  f.confEnfants = f.membres.filter(m => m.type === 'enfant' && m.statut === 'confirme').length;
+  f.rsvp        = foyerRsvp(f);
   f.adresse = document.getElementById(`fadr-${id}`).value;
   f.rem     = document.getElementById(`frem-${id}`).value;
   invExpanded = null; render(); scheduleSave();
@@ -311,8 +375,9 @@ window.deleteFoyer = id => {
 
 window.addFoyer = () => {
   const newId = Math.max(0, ...data.foyers.map(f => f.id)) + 1;
-  data.foyers.unshift({id:newId,nom:"Nouveau foyer",groupe:"Amis Caro",moment:"Journée",adultes:2,enfants:0,rsvp:"En attente",confAdultes:null,confEnfants:null,adresse:"",rem:""});
-  invExpanded = newId; invFilter = 'Tous'; invSearch = '';
+  data.foyers.unshift({id:newId,nom:"Nouveau foyer",groupe:"Amis Caro",moment:"Journée",adultes:2,enfants:0,rsvp:"En attente",confAdultes:null,confEnfants:null,adresse:"",rem:"",
+    membres:[{nom:"Adulte 1",type:"adulte",statut:"attente"},{nom:"Adulte 2",type:"adulte",statut:"attente"}]});
+  invExpanded = newId; invFilter = 'Tous'; invStatus = 'Tous'; invSearch = '';
   render();
   setTimeout(() => { const el = document.getElementById(`fn-${newId}`); if (el) { el.focus(); el.select(); } }, 60);
 };
@@ -350,18 +415,23 @@ window.exportExcel = async () => {
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rev), 'Revenus');
 
-    const inv = data.foyers.map(f => ({
-      Foyer: f.nom,
-      Groupe: f.groupe,
-      Moment: f.moment,
-      'Adultes invités': f.adultes,
-      'Enfants invités': f.enfants,
-      RSVP: f.rsvp,
-      'Adultes confirmés': f.confAdultes ?? '',
-      'Enfants confirmés': f.confEnfants ?? '',
-      Adresse: f.adresse,
-      Remarque: f.rem
-    }));
+    const inv = data.foyers.map(f => {
+      const m = ensureMembres(f);
+      const st = foyerStats(f);
+      return {
+        Foyer: f.nom,
+        Groupe: f.groupe,
+        Moment: f.moment,
+        'Personnes invitées': st.total,
+        RSVP: foyerRsvp(f),
+        Confirmés: st.confirme,
+        'En attente': st.attente,
+        Déclinés: st.decline,
+        Membres: m.map(x => `${x.nom} (${x.statut === 'confirme' ? '✓' : x.statut === 'decline' ? '✗' : '?'})`).join(', '),
+        Adresse: f.adresse,
+        Remarque: f.rem
+      };
+    });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), 'Invités');
 
     XLSX.writeFile(wb, `mariage-${today()}.xlsx`);
