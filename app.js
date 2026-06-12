@@ -2,7 +2,7 @@ import { saveData, listenData, loadOnce, isConfigured, onAuthChange, signIn, doS
 import { CATS, BUDGETS, GROUPES, DEFAULT_DATA } from './data.js';
 
 let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
-let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
+let currentTab = localStorage.getItem('currentTab') || 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
 let invExpanded = null, invSearch = '';
 let depSort = 'echeance', revSort = 'date';
 let epExpanded = null; // null = auto : déplié tant que le solde n'est pas saisi
@@ -856,6 +856,7 @@ window.show = tab => {
   // Quitter l'onglet Invités enregistre le foyer ouvert et le referme.
   if (invExpanded !== null) { commitOpenFoyer(); invExpanded = null; }
   currentTab = tab;
+  localStorage.setItem('currentTab', tab);
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
   document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',revenus:'Revenus & contributions',invites:'Invités'}[tab];
