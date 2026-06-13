@@ -74,13 +74,14 @@ async function startListening() {
 function statut(d) {
   if (d.option) return 'Option';
   if (d.offert) return 'Offert';
+  if (d.caution) return 'Caution';
   if (d.acompte + d.solde >= d.total && d.total > 0) return 'Soldé';
   if (d.acompte > 0) return 'Acompte payé';
   return 'À payer';
 }
 
 function badgeDep(s) {
-  const m = {Soldé:'ok','Acompte payé':'warn','À payer':'red',Option:'purple',Offert:'gray'};
+  const m = {Soldé:'ok','Acompte payé':'warn','À payer':'red',Option:'purple',Offert:'gray',Caution:'amber'};
   return `<span class="badge b-${m[s]||'gray'}">${s}</span>`;
 }
 
@@ -182,7 +183,7 @@ function moisRestants(dateMariage) {
 
 function calcTotals() {
   const e = ensureEpargne();
-  const act = data.depenses.filter(d => !d.option && !d.offert);
+  const act = data.depenses.filter(d => !d.option && !d.offert && !d.caution);
   const engage = act.reduce((s,d) => s + d.total, 0);
   const paye   = act.reduce((s,d) => s + d.acompte + d.solde, 0);
   const reste  = act.reduce((s,d) => s + Math.max(0, d.total - d.acompte - d.solde), 0);
@@ -217,7 +218,7 @@ function renderDashboard() {
   const t = calcTotals();
   const bycat = {};
   CATS.forEach(c => {
-    const ds = data.depenses.filter(d => d.cat === c && !d.option && !d.offert);
+    const ds = data.depenses.filter(d => d.cat === c && !d.option && !d.offert && !d.caution);
     bycat[c] = ds.reduce((s,d) => s + d.total, 0);
   });
   const alerts = prochains().map(d => {
@@ -762,7 +763,7 @@ window.openDepModal = (id = null) => {
     <button type="button" class="btn-sec" style="width:100%;margin-bottom:12px" onclick="markSolde()">✓ Marquer comme entièrement payé</button>
     <div class="mf"><label>Date limite</label><input id="ml" type="date" value="${d ? d.dateLimite : ''}"></div>
     <div class="mf"><label>Remarque</label><textarea id="mr">${d ? escHtml(d.rem) : ''}</textarea></div>
-    <div class="mcheck"><label><input type="checkbox" id="mop"${d && d.option ? ' checked' : ''}> Option</label><label><input type="checkbox" id="mof"${d && d.offert ? ' checked' : ''}> Offert</label></div>
+    <div class="mcheck"><label><input type="checkbox" id="mop"${d && d.option ? ' checked' : ''}> Option</label><label><input type="checkbox" id="mof"${d && d.offert ? ' checked' : ''}> Offert</label><label><input type="checkbox" id="mca"${d && d.caution ? ' checked' : ''}> Caution</label></div>
     <div class="btn-row">
       ${d ? `<button class="btn-del" onclick="deleteDep(${d.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
       <button class="btn-save" onclick="saveDep(${d ? d.id : 'null'})">Enregistrer</button>
@@ -783,6 +784,7 @@ window.saveDep = (id) => {
     cat: document.getElementById('mc').value,
     option: document.getElementById('mop').checked,
     offert: document.getElementById('mof').checked,
+    caution: document.getElementById('mca').checked,
     total: parseFloat(document.getElementById('mt').value) || 0,
     acompte: parseFloat(document.getElementById('ma').value) || 0,
     solde: parseFloat(document.getElementById('ms').value) || 0,
