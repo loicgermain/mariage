@@ -232,9 +232,7 @@ function renderDashboard() {
     return `<div class="brow"><span class="bcat">${c}</span><div class="bwrap"><div class="bbar ${cls}" style="width:${Math.min(pct*100,100).toFixed(0)}%"></div></div><span class="bamt">${eur(eng)}/${eur(bud)}</span></div>`;
   }).join('');
   return `
-    <div class="hero"><div class="hero-lbl">Reste à dépenser (le jour J)</div><div class="hero-val">${eur(t.soldeJourJ)}</div><div class="hero-sub">Dispo aujourd'hui ${eur(t.dispo)} + à venir ${eur(t.aVenir)} − reste à payer ${eur(t.reste)}</div>${t.epargneAVenir > 0 ? `<div class="hero-sub">📈 Dont ${eur(t.epargneAVenir)} d'épargne à venir (${eur(t.mensuel)}/mois × ${t.mois} mois)</div>` : ''}</div>
-    <div class="info-note">💡 L'épargne est le <strong>solde réel</strong> de ton compte mariage : les acomptes déjà payés en sont déjà déduits. « Reste à dépenser le jour J » = cet argent + l'épargne à venir − ce qu'il reste à payer. L'épargne se configure dans l'onglet <strong>Revenus</strong>.</div>
-    <div class="mg"><div class="mc"><div class="ml">Dispo aujourd'hui</div><div class="mv green">${eur(t.dispo)}</div></div><div class="mc"><div class="ml">À venir (épargne + dons)</div><div class="mv purple">${eur(t.aVenir)}</div></div><div class="mc"><div class="ml">Encore à payer</div><div class="mv red">${eur(t.reste)}</div></div><div class="mc"><div class="ml">Coût total mariage</div><div class="mv">${eur(t.engage)}</div></div></div>
+    <div class="mg"><div class="mc"><div class="ml">Économies actuelles</div><div class="mv green">${eur(t.compte)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv purple">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Coût total actuel</div><div class="mv">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
     ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
     <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
