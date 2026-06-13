@@ -2,7 +2,11 @@ import { saveData, listenData, loadOnce, isConfigured, onAuthChange, signIn, doS
 import { CATS, BUDGETS, GROUPES, DEFAULT_DATA } from './data.js';
 
 let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
+// Onglets valides. Sert aussi à restaurer l'onglet actif après un rafraîchissement
+// (pull-to-refresh) : sans ça l'app revenait toujours au dashboard au rechargement.
+const TABS = ['dashboard', 'depenses', 'echeancier', 'revenus', 'invites'];
 let currentTab = 'dashboard', depFilter = 'Tout', invFilter = 'Tous', invStatus = 'Tous';
+try { const t = localStorage.getItem('currentTab'); if (TABS.includes(t)) currentTab = t; } catch {}
 let invExpanded = null, invSearch = '';
 let depSort = 'echeance', revSort = 'date';
 let epVirExpanded = false;   // carte virement auto
@@ -982,6 +986,7 @@ window.show = tab => {
   // Quitter l'onglet Invités enregistre le foyer ouvert et le referme.
   if (invExpanded !== null) { commitOpenFoyer(); invExpanded = null; }
   currentTab = tab;
+  try { localStorage.setItem('currentTab', tab); } catch {}
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
   document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',echeancier:'Échéancier des paiements',revenus:'Revenus & contributions',invites:'Invités'}[tab];
@@ -1019,7 +1024,7 @@ if ('serviceWorker' in navigator) {
 onAuthChange(user => {
   if (user) {
     document.body.classList.remove('locked');
-    render();
+    window.show(currentTab);   // restaure l'onglet actif (survit au pull-to-refresh)
     startListening();
   } else {
     showLogin();
