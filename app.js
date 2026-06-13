@@ -7,6 +7,7 @@ let invExpanded = null, invSearch = '';
 let depSort = 'echeance', revSort = 'date';
 let epVirExpanded = false;   // carte virement auto
 let epSoldeExpanded = null;  // null = auto : déplié tant que le solde n'est pas saisi
+let dashPaiementsExpanded = false;  // dashboard : « Prochains paiements » replié par défaut
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -221,10 +222,15 @@ function renderDashboard() {
     const ds = data.depenses.filter(d => d.cat === c && !d.option && !d.offert && !d.caution);
     bycat[c] = ds.reduce((s,d) => s + d.total, 0);
   });
-  const alerts = prochains().map(d => {
+  const prox = prochains();
+  const proxTotal = prox.reduce((s,d) => s + Math.max(0, d.total - d.acompte - d.solde), 0);
+  const alertsList = prox.map(d => {
     const r = Math.max(0, d.total - d.acompte - d.solde);
     return `<div class="alert"><span class="alert-icon">⏰</span><div class="alert-txt"><strong>${d.desc}</strong> — ${eur2(r)}<br>${d.diff <= 7 ? '⚠️ ' : ''}Échéance dans ${d.diff}j (${d.dateLimite.split('-').reverse().join('/')})</div></div>`;
   }).join('');
+  const paiements = !prox.length ? '' : (dashPaiementsExpanded
+    ? `<div class="stitle mc-click" onclick="toggleDashPaiements()" style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer"><span>Prochains paiements</span><span style="color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span></div>${alertsList}`
+    : `<div class="card mc-click" style="display:flex;align-items:center;gap:10px" onclick="toggleDashPaiements()"><span style="font-size:16px">⏰</span><div style="flex:1;min-width:0;font-size:13px"><strong>Prochains paiements</strong> <span style="color:var(--text-sec)">· ${prox.length}</span></div><div style="font-size:13px;color:var(--purple-dark);font-weight:600;flex-shrink:0">${eur(proxTotal)} ▾</div></div>`);
   const rows = CATS.map(c => {
     const bud = BUDGETS[c], eng = bycat[c];
     if (bud === 0 && eng === 0) return '';
@@ -234,7 +240,7 @@ function renderDashboard() {
   }).join('');
   return `
     <div class="mg"><div class="mc"><div class="ml">Économies actuelles</div><div class="mv green">${eur(t.compte)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv purple">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Coût total actuel</div><div class="mv">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
-    ${alerts ? `<div class="stitle">Prochains paiements</div>${alerts}` : ''}
+    ${paiements}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
     <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
 }
@@ -523,6 +529,7 @@ function renderFoyerExpand(f) {
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
+window.toggleDashPaiements = () => { dashPaiementsExpanded = !dashPaiementsExpanded; render(); };
 window.setDepFilter = f => { depFilter = f; render(); };
 window.setDepSort   = s => { depSort = s; render(); };
 window.setRevSort   = s => { revSort = s; render(); };
