@@ -276,6 +276,66 @@ function renderDepenses() {
   return `<button class="btn-primary" onclick="openDepModal()">+ Nouvelle dépense</button><div class="frow-chips">${chips}</div>${sort}<div class="card">${items || '<div class="empty">Aucune dépense</div>'}</div>`;
 }
 
+// ── Render Échéancier ────────────────────────────────────────────────────────
+const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+function moisLabel(ym) {
+  const [y, m] = ym.split('-');
+  return `${MOIS_FR[+m - 1]} ${y}`.replace(/^./, c => c.toUpperCase());
+}
+
+function renderEcheancier() {
+  // Dépenses réellement à payer : on exclut options, offerts et cautions
+  // (comme le calcul du budget), et tout ce qui n'a plus de reste.
+  const aPayer = data.depenses.filter(d => !d.option && !d.offert && !d.caution && reste(d) > 0);
+  if (!aPayer.length) return `<div class="empty">🎉 Plus rien à payer, tout est soldé !</div>`;
+
+  const totalReste = aPayer.reduce((s, d) => s + reste(d), 0);
+
+  // Avec date limite : regroupées par mois (YYYY-MM) ; sinon « à planifier ».
+  const parMois = {}, sansDate = [];
+  aPayer.forEach(d => {
+    if (d.dateLimite) (parMois[d.dateLimite.slice(0, 7)] ||= []).push(d);
+    else sansDate.push(d);
+  });
+
+  const curYM = today().slice(0, 7);
+  let cumul = 0;
+  const blocs = Object.keys(parMois).sort().map(ym => {
+    const items = parMois[ym].sort((a, b) => a.dateLimite.localeCompare(b.dateLimite));
+    const sousTotal = items.reduce((s, d) => s + reste(d), 0);
+    cumul += sousTotal;
+    const past = ym < curYM;
+    const rows = items.map(d => {
+      const jour = d.dateLimite.split('-').reverse().join('/');
+      const retard = d.dateLimite < today();
+      return `<div class="ditem" onclick="openDepModal(${d.id})">
+        <div><div class="dname">${escHtml(d.desc)}</div><div class="dmeta">${d.cat} · ${jour}${retard ? ' · <span style="color:var(--red)">en retard</span>' : ''}</div></div>
+        <div><div class="damt">${eur2(reste(d))}</div></div>
+      </div>`;
+    }).join('');
+    return `<div class="stitle" style="display:flex;justify-content:space-between;align-items:baseline${past ? ';color:var(--red)' : ''}">
+        <span>${past ? '⚠️ ' : ''}${moisLabel(ym)}</span><span style="font-weight:600">${eur2(sousTotal)}</span>
+      </div>
+      <div class="card" style="margin-bottom:4px">${rows}</div>
+      <div style="text-align:right;font-size:11px;color:var(--text-sec);margin:0 2px 12px">Cumul : ${eur2(cumul)}</div>`;
+  }).join('');
+
+  const sansDateBloc = sansDate.length ? `
+    <div class="stitle">À planifier (sans date limite)</div>
+    <div class="card">${sansDate.sort((a, b) => reste(b) - reste(a)).map(d => `
+      <div class="ditem" onclick="openDepModal(${d.id})">
+        <div><div class="dname">${escHtml(d.desc)}</div><div class="dmeta">${d.cat}</div></div>
+        <div><div class="damt">${eur2(reste(d))}</div></div>
+      </div>`).join('')}</div>` : '';
+
+  return `<div class="hero">
+      <div class="hero-lbl">Reste à payer au total</div>
+      <div class="hero-val">${eur(totalReste)}</div>
+      <div class="hero-sub">${aPayer.length} paiement${aPayer.length > 1 ? 's' : ''}${sansDate.length ? ` · ${sansDate.length} sans date` : ''}</div>
+    </div>
+    ${blocs}${sansDateBloc}`;
+}
+
 // ── Carte 1 : Virement automatique ──────────────────────────────────────────
 function renderVirementAutoCard() {
   const e = ensureEpargne();
@@ -917,7 +977,7 @@ window.show = tab => {
   currentTab = tab;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
-  document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',revenus:'Revenus & contributions',invites:'Invités'}[tab];
+  document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',echeancier:'Échéancier des paiements',revenus:'Revenus & contributions',invites:'Invités'}[tab];
   render();
 };
 
@@ -925,6 +985,7 @@ function render() {
   const c = document.getElementById('content');
   if (currentTab === 'dashboard') c.innerHTML = renderDashboard();
   else if (currentTab === 'depenses') c.innerHTML = renderDepenses();
+  else if (currentTab === 'echeancier') c.innerHTML = renderEcheancier();
   else if (currentTab === 'revenus') c.innerHTML = renderRevenus();
   else if (currentTab === 'invites') c.innerHTML = renderInvites();
 }
