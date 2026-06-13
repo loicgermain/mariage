@@ -234,7 +234,11 @@ function renderDashboard() {
   }).join('');
   const paiements = !prox.length ? '' : (dashPaiementsExpanded
     ? `<div class="stitle mc-click" onclick="toggleDashPaiements()" style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer"><span>Prochains paiements</span><span style="color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span></div>${alertsList}`
-    : `<div class="card mc-click" style="display:flex;align-items:center;gap:10px" onclick="toggleDashPaiements()"><span style="font-size:16px">⏰</span><div style="flex:1;min-width:0;font-size:13px"><strong>Prochains paiements</strong> <span style="color:var(--text-sec)">· ${prox.length}</span></div><div style="font-size:13px;color:var(--purple-dark);font-weight:600;flex-shrink:0">${eur(proxTotal)} ▾</div></div>`);
+    : (() => {
+        const n = prox[0];
+        const nDate = n.dateLimite.split('-').reverse().join('/');
+        return `<div class="card mc-click" style="display:flex;align-items:center;gap:10px" onclick="toggleDashPaiements()"><span style="font-size:16px">⏰</span><div style="flex:1;min-width:0"><div style="font-size:13px"><strong>Prochains paiements</strong> <span style="color:var(--text-sec)">· ${prox.length}</span></div><div style="font-size:11px;color:var(--text-sec)">${n.diff <= 7 ? '⚠️ ' : ''}Prochain le ${nDate} (dans ${n.diff}j)</div></div><div style="font-size:13px;color:var(--purple-dark);font-weight:600;flex-shrink:0">${eur(proxTotal)} ▾</div></div>`;
+      })());
   const rows = CATS.map(c => {
     const bud = BUDGETS[c], eng = bycat[c];
     if (bud === 0 && eng === 0) return '';
