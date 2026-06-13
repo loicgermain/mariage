@@ -353,10 +353,6 @@ function renderRevenus() {
   const total = dons.reduce((s,r) => s + r.montant, 0);
   const recu  = dons.filter(r => r.date).reduce((s,r) => s + r.montant, 0);
   const attente = total - recu;
-  const oldEp = data.revenus.filter(r => r.type === 'Épargne');
-  const hint = oldEp.length
-    ? `<div class="info-note">♻️ ${oldEp.length} ancienne(s) ligne(s) « Épargne » sont remplacées par le bloc ci-dessus. <span onclick="purgeEpargneRevenus()" style="cursor:pointer;color:var(--purple-dark);font-weight:600">Les supprimer</span></div>`
-    : '';
   const items = sortRevenus(dons).map(r => `
     <div class="ritem" onclick="openRevModal(${r.id})">
       <div><div class="rname">${r.source}</div><div class="rmeta">${r.type}</div>${r.date ? '<span class="badge b-ok">Reçu</span>' : '<span class="badge b-warn">En attente</span>'}${r.rem ? ` <span class="badge b-gray">${escHtml(r.rem)}</span>` : ''}</div>
@@ -367,7 +363,6 @@ function renderRevenus() {
     ${renderSoldeCompteCard()}
     <div class="stitle">Cadeaux & contributions</div>
     <button class="btn-primary" onclick="openRevModal()">+ Nouveau revenu</button>
-    ${hint}
     <div class="mg"><div class="mc"><div class="ml">Total prévu</div><div class="mv">${eur(total)}</div></div><div class="mc"><div class="ml">Reçu</div><div class="mv green">${eur(recu)}</div></div><div class="mc"><div class="ml">En attente</div><div class="mv amber">${eur(attente)}</div></div></div>
     ${sort}<div class="card">${items || '<div class="empty">Aucun cadeau / contribution</div>'}</div>`;
 }
@@ -524,11 +519,7 @@ window.saveSoldeCompte = () => {
   render(); scheduleSave();
 };
 
-window.purgeEpargneRevenus = async () => {
-  if (!await confirmModal("Supprimer les anciennes lignes « Épargne » de la liste des revenus ? Le bloc Épargne les remplace.")) return;
-  data.revenus = data.revenus.filter(r => r.type !== 'Épargne');
-  render(); scheduleSave();
-};
+
 window.setInvFilter = f => { invFilter = f; render(); };
 window.setInvStatus = s => { invStatus = (invStatus === s ? 'Tous' : s); render(); };
 // Replier ou changer de foyer enregistre d'abord la saisie en cours (sinon les
