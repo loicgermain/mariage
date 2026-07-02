@@ -13,6 +13,7 @@ let epVirExpanded = false;   // carte virement auto
 let epSoldeExpanded = null;  // null = auto : déplié tant que le solde n'est pas saisi
 let dashPaiementsExpanded = false;  // dashboard : « Prochains paiements » replié par défaut
 let cashChartExpanded = true;  // échéancier : courbe de trésorerie dépliée par défaut
+let cashChartData = null;  // points précalculés du dernier render, pour l'interaction tactile/souris
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -370,7 +371,7 @@ function renderCashChart(proj) {
     </div>`;
   }
 
-  const W = 320, H = 150, padL = 8, padR = 8, padT = 14, padB = 22;
+  const W = 320, H = 150, padL = 40, padR = 8, padT = 14, padB = 22;
   const min = Math.min(0, ...values), max = Math.max(0, ...values);
   const span = (max - min) || 1;
   const x = i => padL + (i / (values.length - 1)) * (W - padL - padR);
@@ -386,6 +387,13 @@ function renderCashChart(proj) {
     ? `<line x1="${padL}" y1="${y(0).toFixed(1)}" x2="${W - padR}" y2="${y(0).toFixed(1)}" stroke="var(--border-med)" stroke-dasharray="3,3"/>`
     : '';
 
+  // Échelle Y : montant max en haut, montant min en bas, « 0 € » si la ligne
+  // zéro est distincte des deux (courbe qui passe du positif au négatif).
+  const yLabels = `
+    <text x="${(padL - 6).toFixed(1)}" y="${(padT + 4).toFixed(1)}" font-size="9" fill="var(--text-sec)" text-anchor="end">${eur(max)}</text>
+    <text x="${(padL - 6).toFixed(1)}" y="${(H - padB).toFixed(1)}" font-size="9" fill="var(--text-sec)" text-anchor="end">${eur(min)}</text>
+    ${(min < 0 && max > 0) ? `<text x="${(padL - 6).toFixed(1)}" y="${(y(0) + 3).toFixed(1)}" font-size="9" fill="var(--text-sec)" text-anchor="end">0 €</text>` : ''}`;
+
   const step = values.length > 8 ? Math.ceil((values.length - 1) / 4) : 1;
   const xLabels = months.map((ym, i) => (i === 0 || i === values.length - 1 || i % step === 0)
     ? `<text x="${x(i).toFixed(1)}" y="${H - 4}" font-size="9" fill="var(--text-sec)" text-anchor="${i === 0 ? 'start' : i === values.length - 1 ? 'end' : 'middle'}">${moisLabelShort(ym)}</text>`
@@ -400,25 +408,71 @@ function renderCashChart(proj) {
     ? `<div style="font-size:11px;color:var(--red-text);margin-top:4px">⚠️ Risque de découvert : ${eur(Math.min(...values))} en ${moisLabel(months[minIdx])}</div>`
     : '';
 
+  // Stocké pour l'interaction tactile/souris (cashChartMove ci-dessous), qui
+  // recalcule le point le plus proche sans avoir à tout re-render.
+  cashChartData = { W, points: values.map((v, i) => ({ x: x(i), y: y(v), v, ym: months[i] })) };
+
   return `<div class="card">
     <div class="card-title mc-click" onclick="toggleCashChart()" style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer">
       <span>📈 Projection de trésorerie</span>
       <span style="font-size:11px;color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
+    <svg id="cash-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">
       ${zeroLine}
       <polygon points="${areaPts}" fill="${fillColor}" opacity="0.5"/>
       <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="2"/>
       ${dots}
+      ${yLabels}
       ${xLabels}
+      <line id="cash-guide-line" x1="0" y1="${padT}" x2="0" y2="${H - padB}" stroke="var(--text-sec)" stroke-dasharray="2,2" style="visibility:hidden"/>
+      <circle id="cash-guide-dot" r="3.5" fill="var(--purple-dark)" stroke="var(--card)" stroke-width="1.5" style="visibility:hidden"/>
+      <rect x="${padL}" y="0" width="${W - padL - padR}" height="${H}" fill="transparent" pointer-events="all" style="touch-action:none;cursor:crosshair"
+        onpointerdown="cashChartMove(event)" onpointermove="cashChartMove(event)"
+        onpointerup="cashChartLeave()" onpointerleave="cashChartLeave()" onpointercancel="cashChartLeave()"></rect>
     </svg>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-sec);margin-top:2px">
-      <span>Aujourd'hui : <strong style="color:var(--text)">${eur(values[0])}</strong></span>
-      <span>Jour J : <strong style="color:var(--text)">${eur(values[values.length - 1])}</strong></span>
-    </div>
+    <div id="cash-readout" style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-sec);margin-top:2px">${cashReadoutDefault()}</div>
     ${alertBadge}
   </div>`;
 }
+
+function cashReadoutDefault() {
+  if (!cashChartData) return '';
+  const pts = cashChartData.points;
+  return `<span>Aujourd'hui : <strong style="color:var(--text)">${eur(pts[0].v)}</strong></span>
+    <span>Jour J : <strong style="color:var(--text)">${eur(pts[pts.length - 1].v)}</strong></span>`;
+}
+
+window.cashChartMove = (e) => {
+  if (!cashChartData) return;
+  const svg = document.getElementById('cash-svg');
+  const rect = svg && svg.getBoundingClientRect();
+  if (!rect || !rect.width) return;
+  const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const vx = fx * cashChartData.W;
+  let idx = 0, best = Infinity;
+  cashChartData.points.forEach((p, i) => { const d = Math.abs(p.x - vx); if (d < best) { best = d; idx = i; } });
+  const p = cashChartData.points[idx];
+
+  const line = document.getElementById('cash-guide-line');
+  const dot = document.getElementById('cash-guide-dot');
+  if (line) { line.setAttribute('x1', p.x); line.setAttribute('x2', p.x); line.style.visibility = 'visible'; }
+  if (dot) {
+    dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+    dot.setAttribute('fill', p.v < 0 ? 'var(--red)' : 'var(--purple-dark)');
+    dot.style.visibility = 'visible';
+  }
+  const ro = document.getElementById('cash-readout');
+  if (ro) ro.innerHTML = `<span>${moisLabel(p.ym)}</span><strong style="color:${p.v < 0 ? 'var(--red-text)' : 'var(--text)'}">${eur(p.v)}</strong>`;
+};
+
+window.cashChartLeave = () => {
+  const line = document.getElementById('cash-guide-line');
+  const dot = document.getElementById('cash-guide-dot');
+  if (line) line.style.visibility = 'hidden';
+  if (dot) dot.style.visibility = 'hidden';
+  const ro = document.getElementById('cash-readout');
+  if (ro) ro.innerHTML = cashReadoutDefault();
+};
 
 function renderEcheancier() {
   const chart = renderCashChart(cashProjection());
