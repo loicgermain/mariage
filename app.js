@@ -250,7 +250,7 @@ function renderDashboard() {
     <div class="mg"><div class="mc"><div class="ml">Économies actuelles</div><div class="mv green">${eur(t.compte)}</div></div><div class="mc"><div class="ml">Déjà payé</div><div class="mv purple">${eur(t.paye)}</div></div><div class="mc"><div class="ml">Coût total actuel</div><div class="mv">${eur(t.engage)}</div></div><div class="mc"><div class="ml">Reste à payer</div><div class="mv red">${eur(t.reste)}</div></div></div>
     ${paiements}
     <div class="card"><div class="card-title">Budget par catégorie</div>${rows}</div>
-    <button class="btn-primary" id="export-btn" style="background:var(--green)" onclick="exportExcel()">📊 Exporter vers Excel</button>`;
+    <button class="btn-primary" id="export-finances-btn" style="background:var(--green)" onclick="exportFinances()">📊 Exporter finances</button>`;
 }
 
 // ── Tri ──────────────────────────────────────────────────────────────────────
@@ -479,7 +479,10 @@ function renderInvites() {
     </div>`;
   }).join('');
 
-  return `<button class="btn-primary" onclick="addFoyer()">+ Nouveau foyer</button>
+  return `<div class="btn-row">
+      <button class="btn-primary" style="width:auto;flex:1" onclick="addFoyer()">+ Nouveau foyer</button>
+      <button class="btn-primary" id="export-invites-btn" style="width:auto;flex:1;background:var(--green)" onclick="exportInvites()">📋 Exporter invités</button>
+    </div>
     <div class="mg mg-4">
       ${statCard('Tous','Invités',totalPax,'purple')}
       ${statCard('Confirmé','Confirmés',confPax,'green')}
@@ -749,8 +752,8 @@ function downloadText(text, filename, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-window.exportExcel = async () => {
-  const btn = document.getElementById('export-btn');
+window.exportFinances = async () => {
+  const btn = document.getElementById('export-finances-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
 
   // Données préparées en amont : réutilisées pour le repli CSV hors ligne.
@@ -786,23 +789,6 @@ window.exportExcel = async () => {
     'Épargne auto à venir (€)': epArgneAVenir,
     'Total le jour J (€)': (e.solde || 0) + epArgneAVenir
   }];
-  const inv = data.foyers.map(f => {
-    const m = ensureMembres(f);
-    const st = foyerStats(f);
-    return {
-      Foyer: f.nom,
-      Groupe: f.groupe,
-      Moment: f.moment,
-      'Personnes invitées': st.total,
-      RSVP: foyerRsvp(f),
-      Confirmés: st.confirme,
-      'En attente': st.attente,
-      Déclinés: st.decline,
-      Membres: m.map(x => `${x.nom} (${x.statut === 'confirme' ? '✓' : x.statut === 'decline' ? '✗' : '?'})`).join(', '),
-      Adresse: f.adresse,
-      Remarque: f.rem
-    };
-  });
 
   try {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
@@ -810,18 +796,63 @@ window.exportExcel = async () => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ep), 'Épargne');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dep), 'Dépenses');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rev), 'Revenus');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), 'Invités');
-    XLSX.writeFile(wb, `mariage-${today()}.xlsx`);
+    XLSX.writeFile(wb, `mariage-finances-${today()}.xlsx`);
   } catch (err) {
     // Hors ligne ou CDN injoignable : repli sur un CSV (sans dépendance).
     try {
-      const csv = ['=== ÉPARGNE ===', toCSV(ep), '', '=== DÉPENSES ===', toCSV(dep), '', '=== REVENUS ===', toCSV(rev), '', '=== INVITÉS ===', toCSV(inv)].join('\r\n');
-      downloadText(csv, `mariage-${today()}.csv`, 'text/csv;charset=utf-8;');
+      const csv = ['=== ÉPARGNE ===', toCSV(ep), '', '=== DÉPENSES ===', toCSV(dep), '', '=== REVENUS ===', toCSV(rev)].join('\r\n');
+      downloadText(csv, `mariage-finances-${today()}.csv`, 'text/csv;charset=utf-8;');
     } catch (e2) {
       alert("Échec de l'export.");
     }
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📊 Exporter vers Excel'; }
+    if (btn) { btn.disabled = false; btn.textContent = '📊 Exporter finances'; }
+  }
+};
+
+window.exportInvites = async () => {
+  const btn = document.getElementById('export-invites-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
+
+  // 1 ligne par foyer, avec une colonne par invité pour permettre un publipostage
+  // (fusion sur "Adresse" pour l'enveloppe, "Invité 1"/"Invité 2"... pour la lettre).
+  const maxMembres = data.foyers.reduce((m, f) => Math.max(m, ensureMembres(f).length), 0);
+  const inv = data.foyers.map(f => {
+    const m = ensureMembres(f);
+    const st = foyerStats(f);
+    const row = {
+      Foyer: f.nom,
+      Adresse: f.adresse,
+      Groupe: f.groupe,
+      Moment: f.moment,
+      'Statut RSVP': foyerRsvp(f),
+      'Nb personnes': st.total,
+      Confirmés: st.confirme,
+      'En attente': st.attente,
+      Déclinés: st.decline
+    };
+    for (let i = 0; i < maxMembres; i++) {
+      const x = m[i];
+      row[`Invité ${i + 1}`] = x ? `${x.nom} (${x.statut === 'confirme' ? 'Confirmé' : x.statut === 'decline' ? 'Décliné' : 'En attente'})` : '';
+    }
+    row.Remarque = f.rem;
+    return row;
+  });
+
+  try {
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inv), 'Invités');
+    XLSX.writeFile(wb, `mariage-invites-${today()}.xlsx`);
+  } catch (err) {
+    // Hors ligne ou CDN injoignable : repli sur un CSV (sans dépendance).
+    try {
+      downloadText(toCSV(inv), `mariage-invites-${today()}.csv`, 'text/csv;charset=utf-8;');
+    } catch (e2) {
+      alert("Échec de l'export.");
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📋 Exporter invités'; }
   }
 };
 
