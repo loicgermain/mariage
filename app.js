@@ -12,6 +12,7 @@ let depSort = 'echeance', revSort = 'date';
 let epVirExpanded = false;   // carte virement auto
 let epSoldeExpanded = null;  // null = auto : déplié tant que le solde n'est pas saisi
 let dashPaiementsExpanded = false;  // dashboard : « Prochains paiements » replié par défaut
+let cashChartExpanded = true;  // échéancier : courbe de trésorerie dépliée par défaut
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -352,6 +353,23 @@ function cashProjection() {
 function renderCashChart(proj) {
   if (!proj) return '';
   const { months, values } = proj;
+  const hasNegativeQuick = Math.min(0, ...values) < 0;
+
+  if (!cashChartExpanded) {
+    const last = values[values.length - 1];
+    const sub = hasNegativeQuick
+      ? '⚠️ Risque de découvert avant le jour J'
+      : `Aujourd'hui ${eur(values[0])} → Jour J`;
+    return `<div class="card mc-click" style="display:flex;align-items:center;gap:10px" onclick="toggleCashChart()">
+      <span style="font-size:16px">📈</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px"><strong>Projection de trésorerie</strong></div>
+        <div style="font-size:11px;color:${hasNegativeQuick ? 'var(--red-text)' : 'var(--text-sec)'}">${sub}</div>
+      </div>
+      <div style="font-size:13px;color:var(--purple-dark);font-weight:600;flex-shrink:0">${eur(last)} ▾</div>
+    </div>`;
+  }
+
   const W = 320, H = 150, padL = 8, padR = 8, padT = 14, padB = 22;
   const min = Math.min(0, ...values), max = Math.max(0, ...values);
   const span = (max - min) || 1;
@@ -383,9 +401,9 @@ function renderCashChart(proj) {
     : '';
 
   return `<div class="card">
-    <div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline">
+    <div class="card-title mc-click" onclick="toggleCashChart()" style="display:flex;justify-content:space-between;align-items:baseline;cursor:pointer">
       <span>📈 Projection de trésorerie</span>
-      <span style="font-size:11px;color:var(--text-sec);font-weight:400">jusqu'au mariage</span>
+      <span style="font-size:11px;color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span>
     </div>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
       ${zeroLine}
@@ -648,6 +666,7 @@ function renderFoyerExpand(f) {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 window.toggleDashPaiements = () => { dashPaiementsExpanded = !dashPaiementsExpanded; render(); };
+window.toggleCashChart = () => { cashChartExpanded = !cashChartExpanded; render(); };
 window.setDepFilter = f => { depFilter = f; render(); };
 window.setDepSort   = s => { depSort = s; render(); };
 window.setRevSort   = s => { revSort = s; render(); };
