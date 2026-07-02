@@ -292,16 +292,123 @@ function renderDepenses() {
 
 // ── Render Échéancier ────────────────────────────────────────────────────────
 const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const MOIS_ABR = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 function moisLabel(ym) {
   const [y, m] = ym.split('-');
   return `${MOIS_FR[+m - 1]} ${y}`.replace(/^./, c => c.toUpperCase());
 }
+function moisLabelShort(ym) {
+  const [y, m] = ym.split('-');
+  return `${MOIS_ABR[+m - 1]} ${y.slice(2)}`;
+}
+
+// Liste de `count+1` mois (YYYY-MM) en partant de `startYM` inclus.
+function monthsFrom(startYM, count) {
+  const [y0, m0] = startYM.split('-').map(Number);
+  const out = [];
+  for (let i = 0; i <= count; i++) {
+    const d = new Date(y0, m0 - 1 + i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+// Projection du solde disponible mois par mois jusqu'au mariage : solde du
+// compte + dons déjà reçus au départ, puis chaque mois +virement auto (si actif)
+// -dépenses dues ce mois-là ; dons à venir et dépenses sans date lissés au
+// dernier mois. Le dernier point égale toujours calcTotals().soldeJourJ.
+function cashProjection() {
+  const e = ensureEpargne();
+  const mois = moisRestants(e.dateMariage);
+  if (!e.dateMariage || mois < 1) return null;
+
+  const curYM = today().slice(0, 7);
+  const months = monthsFrom(curYM, mois);
+  const actif = e.actif !== false;
+  const mensuel = e.mensuel || 0;
+
+  const dons = data.revenus.filter(r => r.type !== 'Épargne');
+  const donsRecus  = dons.filter(r => r.date).reduce((s, r) => s + r.montant, 0);
+  const donsAVenir = dons.filter(r => !r.date).reduce((s, r) => s + r.montant, 0);
+
+  const actDep = data.depenses.filter(d => !d.option && !d.offert && !d.caution && reste(d) > 0);
+  const parMois = {};
+  let sansDateTotal = 0;
+  actDep.forEach(d => {
+    if (d.dateLimite) { const ym = d.dateLimite.slice(0, 7); parMois[ym] = (parMois[ym] || 0) + reste(d); }
+    else sansDateTotal += reste(d);
+  });
+  const depDejaDuesOuEnRetard = Object.keys(parMois).filter(ym => ym <= curYM).reduce((s, ym) => s + parMois[ym], 0);
+
+  const values = [(e.solde || 0) + donsRecus - depDejaDuesOuEnRetard];
+  for (let i = 1; i <= mois; i++) {
+    let v = values[i - 1] + (actif ? mensuel : 0) - (parMois[months[i]] || 0);
+    if (i === mois) v += donsAVenir - sansDateTotal;
+    values.push(v);
+  }
+  return { months, values };
+}
+
+function renderCashChart(proj) {
+  if (!proj) return '';
+  const { months, values } = proj;
+  const W = 320, H = 150, padL = 8, padR = 8, padT = 14, padB = 22;
+  const min = Math.min(0, ...values), max = Math.max(0, ...values);
+  const span = (max - min) || 1;
+  const x = i => padL + (i / (values.length - 1)) * (W - padL - padR);
+  const y = v => padT + (1 - (v - min) / span) * (H - padT - padB);
+
+  const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const areaPts = `${x(0).toFixed(1)},${y(0).toFixed(1)} ${pts} ${x(values.length - 1).toFixed(1)},${y(0).toFixed(1)}`;
+
+  const hasNegative = min < 0;
+  const lineColor = hasNegative ? 'var(--red)' : 'var(--purple)';
+  const fillColor = hasNegative ? 'var(--red-light)' : 'var(--purple-light)';
+  const zeroLine = (min < 0 && max > 0)
+    ? `<line x1="${padL}" y1="${y(0).toFixed(1)}" x2="${W - padR}" y2="${y(0).toFixed(1)}" stroke="var(--border-med)" stroke-dasharray="3,3"/>`
+    : '';
+
+  const step = values.length > 8 ? Math.ceil((values.length - 1) / 4) : 1;
+  const xLabels = months.map((ym, i) => (i === 0 || i === values.length - 1 || i % step === 0)
+    ? `<text x="${x(i).toFixed(1)}" y="${H - 4}" font-size="9" fill="var(--text-sec)" text-anchor="${i === 0 ? 'start' : i === values.length - 1 ? 'end' : 'middle'}">${moisLabelShort(ym)}</text>`
+    : '').join('');
+
+  const minIdx = values.indexOf(Math.min(...values));
+  const dots = values.map((v, i) => (i === 0 || i === values.length - 1 || i === minIdx)
+    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.5" fill="${i === minIdx && hasNegative ? 'var(--red)' : 'var(--purple-dark)'}"/>`
+    : '').join('');
+
+  const alertBadge = hasNegative
+    ? `<div style="font-size:11px;color:var(--red-text);margin-top:4px">⚠️ Risque de découvert : ${eur(Math.min(...values))} en ${moisLabel(months[minIdx])}</div>`
+    : '';
+
+  return `<div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:baseline">
+      <span>📈 Projection de trésorerie</span>
+      <span style="font-size:11px;color:var(--text-sec);font-weight:400">jusqu'au mariage</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
+      ${zeroLine}
+      <polygon points="${areaPts}" fill="${fillColor}" opacity="0.5"/>
+      <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="2"/>
+      ${dots}
+      ${xLabels}
+    </svg>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-sec);margin-top:2px">
+      <span>Aujourd'hui : <strong style="color:var(--text)">${eur(values[0])}</strong></span>
+      <span>Jour J : <strong style="color:var(--text)">${eur(values[values.length - 1])}</strong></span>
+    </div>
+    ${alertBadge}
+  </div>`;
+}
 
 function renderEcheancier() {
+  const chart = renderCashChart(cashProjection());
+
   // Dépenses réellement à payer : on exclut options, offerts et cautions
   // (comme le calcul du budget), et tout ce qui n'a plus de reste.
   const aPayer = data.depenses.filter(d => !d.option && !d.offert && !d.caution && reste(d) > 0);
-  if (!aPayer.length) return `<div class="empty">🎉 Plus rien à payer, tout est soldé !</div>`;
+  if (!aPayer.length) return `${chart}<div class="empty">🎉 Plus rien à payer, tout est soldé !</div>`;
 
   const totalReste = aPayer.reduce((s, d) => s + reste(d), 0);
 
@@ -342,7 +449,7 @@ function renderEcheancier() {
         <div><div class="damt">${eur2(reste(d))}</div></div>
       </div>`).join('')}</div>` : '';
 
-  return `<div class="hero">
+  return `${chart}<div class="hero">
       <div class="hero-lbl">Reste à payer au total</div>
       <div class="hero-val">${eur(totalReste)}</div>
       <div class="hero-sub">${aPayer.length} paiement${aPayer.length > 1 ? 's' : ''}${sansDate.length ? ` · ${sansDate.length} sans date` : ''}</div>
