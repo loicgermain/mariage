@@ -417,7 +417,8 @@ function renderCashChart(proj) {
       <span>📈 Projection de trésorerie</span>
       <span style="font-size:11px;color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span>
     </div>
-    <svg id="cash-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">
+    <div id="cash-readout" style="text-align:center;padding:2px 0 8px;min-height:36px">${cashReadoutDefault()}</div>
+    <svg id="cash-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none">
       ${zeroLine}
       <polygon points="${areaPts}" fill="${fillColor}" opacity="0.5"/>
       <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="2"/>
@@ -426,11 +427,13 @@ function renderCashChart(proj) {
       ${xLabels}
       <line id="cash-guide-line" x1="0" y1="${padT}" x2="0" y2="${H - padB}" stroke="var(--text-sec)" stroke-dasharray="2,2" style="visibility:hidden"/>
       <circle id="cash-guide-dot" r="3.5" fill="var(--purple-dark)" stroke="var(--card)" stroke-width="1.5" style="visibility:hidden"/>
-      <rect x="${padL}" y="0" width="${W - padL - padR}" height="${H}" fill="transparent" pointer-events="all" style="touch-action:none;cursor:crosshair"
+      <rect x="${padL}" y="0" width="${W - padL - padR}" height="${H}" fill="transparent" pointer-events="all"
+        style="touch-action:none;cursor:crosshair;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none"
         onpointerdown="cashChartMove(event)" onpointermove="cashChartMove(event)"
-        onpointerup="cashChartLeave()" onpointerleave="cashChartLeave()" onpointercancel="cashChartLeave()"></rect>
+        onpointerup="cashChartLeave()" onpointerleave="cashChartLeave()" onpointercancel="cashChartLeave()"
+        ontouchstart="event.preventDefault()" ontouchmove="event.preventDefault()"
+        oncontextmenu="return false" onselectstart="return false"></rect>
     </svg>
-    <div id="cash-readout" style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-sec);margin-top:2px">${cashReadoutDefault()}</div>
     ${alertBadge}
   </div>`;
 }
@@ -438,12 +441,12 @@ function renderCashChart(proj) {
 function cashReadoutDefault() {
   if (!cashChartData) return '';
   const pts = cashChartData.points;
-  return `<span>Aujourd'hui : <strong style="color:var(--text)">${eur(pts[0].v)}</strong></span>
-    <span>Jour J : <strong style="color:var(--text)">${eur(pts[pts.length - 1].v)}</strong></span>`;
+  return `<span style="font-size:11px;color:var(--text-sec)">Aujourd'hui&nbsp;: <strong style="font-size:13px;color:var(--text)">${eur(pts[0].v)}</strong> &nbsp;→&nbsp; Jour J&nbsp;: <strong style="font-size:13px;color:var(--text)">${eur(pts[pts.length - 1].v)}</strong></span>`;
 }
 
 window.cashChartMove = (e) => {
   if (!cashChartData) return;
+  if (e.cancelable) e.preventDefault();
   const svg = document.getElementById('cash-svg');
   const rect = svg && svg.getBoundingClientRect();
   if (!rect || !rect.width) return;
@@ -462,7 +465,7 @@ window.cashChartMove = (e) => {
     dot.style.visibility = 'visible';
   }
   const ro = document.getElementById('cash-readout');
-  if (ro) ro.innerHTML = `<span>${moisLabel(p.ym)}</span><strong style="color:${p.v < 0 ? 'var(--red-text)' : 'var(--text)'}">${eur(p.v)}</strong>`;
+  if (ro) ro.innerHTML = `<div style="font-size:12px;color:var(--text-sec)">${moisLabel(p.ym)}</div><div style="font-size:20px;font-weight:700;color:${p.v < 0 ? 'var(--red-text)' : 'var(--purple-dark)'}">${eur(p.v)}</div>`;
 };
 
 window.cashChartLeave = () => {
