@@ -190,6 +190,9 @@
     .seg-b.sb-a.on { background: var(--surface); color: var(--text); }
     .seg-b.sb-c.on { background: var(--green); color: #fff; }
     .seg-b.sb-d.on { background: #E24B4A; color: #fff; }
+    .mbr-food { background: none; border: none; cursor: pointer; font-size: 14px; opacity: .4; flex-shrink: 0; padding: 2px; position: relative; }
+    .mbr-food.has-data { opacity: 1; }
+    .mbr-food.has-data::after { content: ''; position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); border: 1.5px solid var(--card); }
     .mbr-del { background: none; border: none; cursor: pointer; font-size: 14px; opacity: .55; flex-shrink: 0; padding: 2px; }
     .mbr-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
     .mbr-actions .btn-sec { flex: 1; padding: 8px 6px; font-size: 12px; min-width: 72px; }
@@ -212,6 +215,8 @@
     .mf textarea { resize: none; height: 64px; }
     .mcheck{ display: flex; gap: 20px; margin-bottom: 14px; font-size: 13px; color: var(--text); }
     .mcheck label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .mcheck-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; font-size: 13px; color: var(--text); }
+    .mcheck-grid label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
     /* Loading */
     .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px; gap: 14px; color: var(--text-sec); }
@@ -281,7 +286,7 @@
       <span class="icon">💳</span>Dépenses
     </button>
     <button class="nav-btn" id="nav-echeancier" onclick="show('echeancier')">
-      <span class="icon">📅</span>Échéancier
+      <span class="icon">📅</span>Planning
     </button>
     <button class="nav-btn" id="nav-revenus" onclick="show('revenus')">
       <span class="icon">💰</span>Revenus

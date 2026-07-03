@@ -1,5 +1,5 @@
 import { saveData, listenData, loadOnce, isConfigured, onAuthChange, signIn, doSignOut } from './firebase.js';
-import { CATS, BUDGETS, GROUPES, DEFAULT_DATA } from './data.js';
+import { CATS, BUDGETS, GROUPES, REGIMES, ALLERGENES, DEFAULT_DATA } from './data.js';
 
 let data = JSON.parse(JSON.stringify(DEFAULT_DATA));
 // Onglets valides. Sert aussi à restaurer l'onglet actif après un rafraîchissement
@@ -14,6 +14,8 @@ let epSoldeExpanded = null;  // null = auto : déplié tant que le solde n'est p
 let dashPaiementsExpanded = false;  // dashboard : « Prochains paiements » replié par défaut
 let cashChartExpanded = true;  // échéancier : courbe de trésorerie dépliée par défaut
 let cashChartData = null;  // points précalculés du dernier render, pour l'interaction tactile/souris
+let planningView = 'paiements';  // échéancier : bascule Paiements / Tâches
+let allergieModalRow = null;  // ligne .mbr en cours d'édition dans la modale allergies/régime
 let saveTimer = null, isOnline = false;
 let privacyMode = false;
 
@@ -477,13 +479,21 @@ window.cashChartLeave = () => {
   if (ro) ro.innerHTML = cashReadoutDefault();
 };
 
+window.setPlanningView = v => { planningView = v; render(); };
+
 function renderEcheancier() {
+  const switcher = `<div class="frow-chips">
+    <button class="chip${planningView === 'paiements' ? ' active' : ''}" onclick="setPlanningView('paiements')">💰 Paiements</button>
+    <button class="chip${planningView === 'taches' ? ' active' : ''}" onclick="setPlanningView('taches')">✅ Tâches</button>
+  </div>`;
+  if (planningView === 'taches') return switcher + renderTaches();
+
   const chart = renderCashChart(cashProjection());
 
   // Dépenses réellement à payer : on exclut options, offerts et cautions
   // (comme le calcul du budget), et tout ce qui n'a plus de reste.
   const aPayer = data.depenses.filter(d => !d.option && !d.offert && !d.caution && reste(d) > 0);
-  if (!aPayer.length) return `${chart}<div class="empty">🎉 Plus rien à payer, tout est soldé !</div>`;
+  if (!aPayer.length) return `${switcher}${chart}<div class="empty">🎉 Plus rien à payer, tout est soldé !</div>`;
 
   const totalReste = aPayer.reduce((s, d) => s + reste(d), 0);
 
@@ -524,13 +534,86 @@ function renderEcheancier() {
         <div><div class="damt">${eur2(reste(d))}</div></div>
       </div>`).join('')}</div>` : '';
 
-  return `${chart}<div class="hero">
+  return `${switcher}${chart}<div class="hero">
       <div class="hero-lbl">Reste à payer au total</div>
       <div class="hero-val">${eur(totalReste)}</div>
       <div class="hero-sub">${aPayer.length} paiement${aPayer.length > 1 ? 's' : ''}${sansDate.length ? ` · ${sansDate.length} sans date` : ''}</div>
     </div>
     ${blocs}${sansDateBloc}`;
 }
+
+// ── Render Tâches ────────────────────────────────────────────────────────────
+function renderTaches() {
+  const taches = data.taches || [];
+  const restantes = taches.filter(t => !t.fait).length;
+  const sorted = [...taches].sort((a, b) => {
+    if (!!a.fait !== !!b.fait) return a.fait ? 1 : -1;
+    return (a.dateLimite || '9999-99-99').localeCompare(b.dateLimite || '9999-99-99');
+  });
+
+  const items = sorted.map(t => {
+    const retard = !t.fait && t.dateLimite && t.dateLimite < today();
+    const jour = t.dateLimite ? t.dateLimite.split('-').reverse().join('/') : '';
+    return `<div class="ditem" style="align-items:center">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0" onclick="openTacheModal(${t.id})">
+        <input type="checkbox" ${t.fait ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleTache(${t.id})" style="width:18px;height:18px;flex-shrink:0">
+        <div style="min-width:0">
+          <div class="dname" style="${t.fait ? 'text-decoration:line-through;color:var(--text-sec)' : ''}">${escHtml(t.texte)}</div>
+          ${jour ? `<div class="dmeta">${jour}${retard ? ' · <span style="color:var(--red)">en retard</span>' : ''}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<button class="btn-primary" onclick="openTacheModal()">+ Nouvelle tâche</button>
+    <div class="hero">
+      <div class="hero-lbl">Tâches restantes</div>
+      <div class="hero-val">${restantes}</div>
+      <div class="hero-sub">${taches.length} tâche${taches.length > 1 ? 's' : ''} au total</div>
+    </div>
+    <div class="card">${items || '<div class="empty">Aucune tâche pour l’instant</div>'}</div>`;
+}
+
+window.openTacheModal = (id = null) => {
+  const t = id !== null ? (data.taches || []).find(x => x.id === id) : null;
+  document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
+    <div class="mtitle">${t ? 'Modifier la tâche' : 'Nouvelle tâche'} <button onclick="closeModal()" class="mclose" aria-label="Fermer">✕</button></div>
+    <div class="mf"><label>Tâche</label><input id="tt" type="text" placeholder="Ex: Envoyer les faire-part" value="${t ? escAttr(t.texte) : ''}"></div>
+    <div class="mf"><label>Date limite (optionnelle)</label><input id="td" type="date" value="${t ? (t.dateLimite || '') : ''}"></div>
+    <div class="mf"><label>Remarque</label><textarea id="tr">${t ? escHtml(t.rem || '') : ''}</textarea></div>
+    <div class="btn-row">
+      ${t ? `<button class="btn-del" onclick="deleteTache(${t.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
+      <button class="btn-save" onclick="saveTache(${t ? t.id : 'null'})">Enregistrer</button>
+    </div>
+  </div></div>`;
+  setTimeout(() => document.getElementById('tt').focus(), 60);
+};
+
+window.saveTache = (id) => {
+  const texte = document.getElementById('tt').value.trim();
+  if (!texte) return;
+  const fields = { texte, dateLimite: document.getElementById('td').value || '', rem: document.getElementById('tr').value };
+  if (!Array.isArray(data.taches)) data.taches = [];
+  if (id === null) {
+    const newId = Math.max(0, ...data.taches.map(t => t.id)) + 1;
+    data.taches.push({ id: newId, fait: false, ...fields });
+  } else {
+    const t = data.taches.find(x => x.id === id);
+    if (t) Object.assign(t, fields);
+  }
+  closeModal(); render(); scheduleSave();
+};
+
+window.deleteTache = async (id) => {
+  if (!await confirmModal('Supprimer cette tâche ?')) return;
+  data.taches = data.taches.filter(t => t.id !== id);
+  closeModal(); render(); scheduleSave();
+};
+
+window.toggleTache = (id) => {
+  const t = (data.taches || []).find(x => x.id === id);
+  if (t) { t.fait = !t.fait; render(); scheduleSave(); }
+};
 
 // ── Carte 1 : Virement automatique ──────────────────────────────────────────
 function renderVirementAutoCard() {
@@ -689,9 +772,11 @@ function renderFoyerExpand(f) {
       <button type="button" class="seg-b sb-c${statut==='confirme'?' on':''}" onclick="setMbr(this,'confirme')" title="Confirmé">✓</button>
       <button type="button" class="seg-b sb-d${statut==='decline'?' on':''}" onclick="setMbr(this,'decline')" title="Décliné">✗</button>
     </div>`;
-  const mbrRow = (m) => `<div class="mbr" data-statut="${m.statut}" data-type="${m.type}">
+  const hasFoodInfo = m => (m.regime && m.regime !== 'Standard') || (m.allergies && m.allergies.length) || m.allergieAutre;
+  const mbrRow = (m) => `<div class="mbr" data-statut="${m.statut}" data-type="${m.type}" data-regime="${escAttr(m.regime || 'Standard')}" data-allergies="${escAttr((m.allergies || []).join(','))}" data-allergie-autre="${escAttr(m.allergieAutre || '')}">
       <input class="mbr-nom" value="${escAttr(m.nom)}" placeholder="${m.type==='enfant'?'Enfant':'Nom'}">
       ${seg(m.statut)}
+      <button type="button" class="mbr-food${hasFoodInfo(m) ? ' has-data' : ''}" onclick="openAllergieModal(this)" title="Allergies / régime" aria-label="Allergies et régime">🍽️</button>
       <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer" aria-label="Retirer ce membre">🗑</button>
     </div>`;
   return `<div class="expand">
@@ -805,11 +890,19 @@ function readFoyerFromDOM(id) {
   f.groupe = document.getElementById(`fg-${id}`).value;
   f.moment = document.getElementById(`fm-${id}`).value;
   const rows = document.querySelectorAll(`#mlist-${id} .mbr`);
-  f.membres = Array.from(rows).map(row => ({
-    nom: row.querySelector('.mbr-nom').value.trim() || (row.dataset.type === 'enfant' ? 'Enfant' : 'Adulte'),
-    type: row.dataset.type === 'enfant' ? 'enfant' : 'adulte',
-    statut: row.dataset.statut || 'attente'
-  }));
+  f.membres = Array.from(rows).map(row => {
+    const m = {
+      nom: row.querySelector('.mbr-nom').value.trim() || (row.dataset.type === 'enfant' ? 'Enfant' : 'Adulte'),
+      type: row.dataset.type === 'enfant' ? 'enfant' : 'adulte',
+      statut: row.dataset.statut || 'attente'
+    };
+    if (row.dataset.regime && row.dataset.regime !== 'Standard') m.regime = row.dataset.regime;
+    const allergies = (row.dataset.allergies || '').split(',').filter(Boolean);
+    if (allergies.length) m.allergies = allergies;
+    const autre = (row.dataset.allergieAutre || '').trim();
+    if (autre) m.allergieAutre = autre;
+    return m;
+  });
   // Compteurs dérivés (rétro-compat + export Excel)
   f.adultes     = f.membres.filter(m => m.type === 'adulte').length;
   f.enfants     = f.membres.filter(m => m.type === 'enfant').length;
@@ -843,6 +936,48 @@ window.setMbr = (btn, statut) => {
 
 window.delMbr = (btn) => { btn.closest('.mbr').remove(); };
 
+// ── Allergies / régime alimentaire d'un membre ────────────────────────────────
+// Stockées comme attributs data-* sur la ligne .mbr (comme statut/type), pour
+// que readFoyerFromDOM() les retrouve sans avoir à les recroiser par index avec
+// l'ancien tableau membres (qui se décale dès qu'un membre est ajouté/retiré).
+window.openAllergieModal = (btn) => {
+  const row = btn.closest('.mbr');
+  allergieModalRow = row;
+  const regime = row.dataset.regime || 'Standard';
+  const allergies = (row.dataset.allergies || '').split(',').filter(Boolean);
+  const autre = row.dataset.allergieAutre || '';
+  const nom = row.querySelector('.mbr-nom').value.trim() || 'cet invité';
+  const regimeOpts = REGIMES.map(r => `<option${r === regime ? ' selected' : ''}>${r}</option>`).join('');
+  const allergieChecks = ALLERGENES.map(a =>
+    `<label><input type="checkbox" value="${escAttr(a)}"${allergies.includes(a) ? ' checked' : ''}> ${a}</label>`
+  ).join('');
+  document.getElementById('modal-root').innerHTML = `<div class="mbg"><div class="modal">
+    <div class="mtitle">🍽️ ${escHtml(nom)} <button onclick="closeAllergieModal()" class="mclose" aria-label="Fermer">✕</button></div>
+    <div class="mf"><label>Régime alimentaire</label><select id="am-regime">${regimeOpts}</select></div>
+    <div class="mf"><label>Allergies</label><div class="mcheck-grid" id="am-allergies">${allergieChecks}</div></div>
+    <div class="mf"><label>Autre allergie / précision</label><input id="am-autre" type="text" placeholder="Ex: kiwi" value="${escAttr(autre)}"></div>
+    <div class="btn-row">
+      <button class="btn-sec" onclick="closeAllergieModal()">Annuler</button>
+      <button class="btn-save" onclick="saveAllergieModal()">Enregistrer</button>
+    </div>
+  </div></div>`;
+};
+
+window.saveAllergieModal = () => {
+  if (!allergieModalRow) return;
+  const regime = document.getElementById('am-regime').value;
+  const checked = Array.from(document.querySelectorAll('#am-allergies input:checked')).map(i => i.value);
+  const autre = document.getElementById('am-autre').value.trim();
+  allergieModalRow.dataset.regime = regime;
+  allergieModalRow.dataset.allergies = checked.join(',');
+  allergieModalRow.dataset.allergieAutre = autre;
+  const btn = allergieModalRow.querySelector('.mbr-food');
+  if (btn) btn.classList.toggle('has-data', (regime !== 'Standard') || checked.length > 0 || !!autre);
+  closeAllergieModal();
+};
+
+window.closeAllergieModal = () => { allergieModalRow = null; closeModal(); };
+
 window.addMbr = (foyerId, type) => {
   const list = document.getElementById('mlist-' + foyerId);
   if (!list) return;
@@ -851,12 +986,16 @@ window.addMbr = (foyerId, type) => {
   row.className = 'mbr';
   row.dataset.statut = 'attente';
   row.dataset.type = type;
+  row.dataset.regime = 'Standard';
+  row.dataset.allergies = '';
+  row.dataset.allergieAutre = '';
   row.innerHTML = `<input class="mbr-nom" value="${(type === 'enfant' ? 'Enfant ' : 'Adulte ') + n}" placeholder="Nom">
     <div class="seg">
       <button type="button" class="seg-b sb-a on" onclick="setMbr(this,'attente')" title="En attente">?</button>
       <button type="button" class="seg-b sb-c" onclick="setMbr(this,'confirme')" title="Confirmé">✓</button>
       <button type="button" class="seg-b sb-d" onclick="setMbr(this,'decline')" title="Décliné">✗</button>
     </div>
+    <button type="button" class="mbr-food" onclick="openAllergieModal(this)" title="Allergies / régime" aria-label="Allergies et régime">🍽️</button>
     <button type="button" class="mbr-del" onclick="delMbr(this)" title="Retirer" aria-label="Retirer ce membre">🗑</button>`;
   list.appendChild(row);
 };
@@ -1207,7 +1346,7 @@ window.show = tab => {
   try { localStorage.setItem('currentTab', tab); } catch {}
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
-  document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',echeancier:'Échéancier des paiements',revenus:'Revenus & contributions',invites:'Invités'}[tab];
+  document.getElementById('topbar-sub').textContent = {dashboard:'Budget mariage',depenses:'Dépenses',echeancier:'Planning : paiements & tâches',revenus:'Revenus & contributions',invites:'Invités'}[tab];
   render();
 };
 
