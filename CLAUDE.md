@@ -38,7 +38,7 @@ servie = déploiement.
 {
   depenses: [ { id, categorie, nom, montant, paye, caution, date, notes... } ],
   revenus:  [ { id, source, montant, date, ... } ],
-  foyers:   [ { id, nom, groupe, membres: [{ nom, statut(attente/confirme/decline), regime, allergenes }], ... } ],
+  foyers:   [ { id, nom, groupe, membres: [{ nom, statut(attente/confirme/decline), regime, allergies, allergieAutre }], ... } ],
   taches:   [ { id, texte, fait, ... } ],
   epargne:  { ... solde compte, virement auto mensuel ... }
 }

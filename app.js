@@ -1156,6 +1156,8 @@ window.exportInvites = async () => {
     for (let i = 0; i < maxMembres; i++) {
       const x = m[i];
       row[`Invité ${i + 1}`] = x ? `${x.nom} (${x.statut === 'confirme' ? 'Confirmé' : x.statut === 'decline' ? 'Décliné' : 'En attente'})` : '';
+      row[`Invité ${i + 1} - Régime`] = x ? (x.regime || 'Standard') : '';
+      row[`Invité ${i + 1} - Allergies`] = x ? [...(x.allergies || []), x.allergieAutre].filter(Boolean).join(', ') : '';
     }
     row.Remarque = f.rem;
     return row;
