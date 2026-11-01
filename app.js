@@ -373,7 +373,13 @@ function renderCashChart(proj) {
     </div>`;
   }
 
-  const W = 320, H = 150, padL = 40, padR = 8, padT = 14, padB = 22;
+  // Largeur du viewBox = largeur réelle affichée (contenu − padding de la
+  // carte), pour que le SVG ne soit pas étiré : sinon textes et points sont
+  // déformés sur tablette. Re-render au redimensionnement (voir Init).
+  const contentEl = document.getElementById('content');
+  const cs = contentEl && getComputedStyle(contentEl);
+  const largeur = contentEl ? contentEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 33 : 0;
+  const W = largeur > 200 ? Math.round(largeur) : 320, H = 150, padL = 40, padR = 8, padT = 14, padB = 22;
   const min = Math.min(0, ...values), max = Math.max(0, ...values);
   const span = (max - min) || 1;
   const x = i => padL + (i / (values.length - 1)) * (W - padL - padR);
@@ -420,7 +426,7 @@ function renderCashChart(proj) {
       <span style="font-size:11px;color:var(--purple-dark);font-weight:600;text-transform:none;letter-spacing:0">Replier ▲</span>
     </div>
     <div id="cash-readout" style="text-align:center;padding:2px 0 8px;min-height:36px">${cashReadoutDefault()}</div>
-    <svg id="cash-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none">
+    <svg id="cash-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none">
       ${zeroLine}
       <polygon points="${areaPts}" fill="${fillColor}" opacity="0.5"/>
       <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="2"/>
@@ -1400,6 +1406,18 @@ if ('serviceWorker' in navigator) {
     setInterval(() => reg.update(), 60 * 60 * 1000);
   });
 }
+
+// Re-render de la courbe de trésorerie quand la largeur change (rotation
+// tablette, redimensionnement) pour garder un viewBox à l'échelle 1:1.
+let resizeTimer = null, derniereLargeur = window.innerWidth;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (window.innerWidth === derniereLargeur) return;   // ignore les resize verticaux (clavier mobile)
+    derniereLargeur = window.innerWidth;
+    if (currentTab === 'echeancier' && cashChartExpanded && !document.getElementById('modal-root').innerHTML) render();
+  }, 150);
+});
 
 onAuthChange(user => {
   if (user) {

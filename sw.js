@@ -1,4 +1,4 @@
-const CACHE = 'mariage-v23';
+const CACHE = 'mariage-v24';
 const ASSETS = ['/mariage/', '/mariage/index.html', '/mariage/app.js', '/mariage/data.js', '/mariage/firebase.js', '/mariage/manifest.json'];
 
 self.addEventListener('install', e => {
