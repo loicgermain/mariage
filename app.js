@@ -581,6 +581,7 @@ window.openTacheModal = (id = null) => {
     <div class="mf"><label>Tâche</label><input id="tt" type="text" placeholder="Ex: Envoyer les faire-part" value="${t ? escAttr(t.texte) : ''}"></div>
     <div class="mf"><label>Date limite (optionnelle)</label><input id="td" type="date" value="${t ? (t.dateLimite || '') : ''}"></div>
     <div class="mf"><label>Remarque</label><textarea id="tr">${t ? escHtml(t.rem || '') : ''}</textarea></div>
+    <button class="btn-sec" style="width:100%;margin-bottom:10px" onclick="ajouterTacheAgenda()">📅 Ajouter à Google Agenda</button>
     <div class="btn-row">
       ${t ? `<button class="btn-del" onclick="deleteTache(${t.id})">🗑 Supprimer</button>` : `<button class="btn-sec" onclick="closeModal()">Annuler</button>`}
       <button class="btn-save" onclick="saveTache(${t ? t.id : 'null'})">Enregistrer</button>
@@ -602,6 +603,26 @@ window.saveTache = (id) => {
     if (t) Object.assign(t, fields);
   }
   closeModal(); render(); scheduleSave();
+};
+
+// Ouvre Google Agenda avec un événement « journée entière » pré-rempli
+// (lien TEMPLATE, sans OAuth). Copie ponctuelle : pas de synchro ensuite.
+window.ajouterTacheAgenda = () => {
+  const texte = document.getElementById('tt').value.trim();
+  const date = document.getElementById('td').value;
+  if (!texte) { document.getElementById('tt').focus(); return; }
+  if (!date) { alert('Indique une date limite pour l’ajouter à l’agenda.'); document.getElementById('td').focus(); return; }
+  const [a, m, j] = date.split('-').map(Number);
+  const fmt = d => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const debut = new Date(Date.UTC(a, m - 1, j));
+  const fin = new Date(Date.UTC(a, m - 1, j + 1)); // date de fin exclusive
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: texte,
+    dates: `${fmt(debut)}/${fmt(fin)}`,
+    details: document.getElementById('tr').value.trim(),
+  });
+  window.open(`https://calendar.google.com/calendar/render?${params}`, '_blank', 'noopener');
 };
 
 window.deleteTache = async (id) => {
